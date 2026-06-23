@@ -176,13 +176,23 @@ def upsert_candidate(
     if not normalized_text:
         return
 
+    # 💡 [신규 로직] 이미 정식 사전에 등록된 용어인지 확인
+    sql_check = "SELECT 1 FROM term_aliases WHERE alias_normalized = %s AND status = 'active' LIMIT 1"
+    cur.execute(sql_check, (normalized_text,))
+    is_already_active = cur.fetchone() is not None
+
+    # 💡 이미 있으면 'already_active', 없으면 'pending'으로 상태 설정
+    target_review_status = 'already_active' if is_already_active else 'pending'
+
+    # 💡 기존 SELECT문에 review_status를 추가하여 가져옵니다.
     sql_select = """
     SELECT
         candidate_id,
         detected_count,
         sample_doc_ids_json,
         sample_titles_json,
-        sample_snippets_json
+        sample_snippets_json,
+        review_status
     FROM term_candidate_queue
     WHERE candidate_type = %s
       AND normalized_text = %s
@@ -199,6 +209,7 @@ def upsert_candidate(
     if row:
         candidate_id = int(row[0])
         detected_count = int(row[1] or 0)
+        current_review_status = str(row[5] or "pending") # 기존 상태 확인
 
         doc_ids = _safe_json_loads(row[2])
         titles = _safe_json_loads(row[3])
@@ -207,6 +218,10 @@ def upsert_candidate(
         doc_ids = _merge_samples(doc_ids, incoming_doc_ids)
         titles = _merge_samples(titles, incoming_titles)
         snippets = _merge_samples(snippets, incoming_snippets)
+
+        # 💡 [상태 전이 로직] 
+        # 기존에 대기열(pending) 상태였더라도, 그 사이 정식 사전에 등록되었다면 'already_active'로 전환
+        new_status = 'already_active' if (is_already_active and current_review_status == 'pending') else current_review_status
 
         sql_update = """
         UPDATE term_candidate_queue
@@ -225,6 +240,7 @@ def upsert_candidate(
             sample_doc_ids_json = %s,
             sample_titles_json = %s,
             sample_snippets_json = %s,
+            review_status = %s,   /* 💡 갱신된 상태 반영 */
             last_seen_at = CURRENT_TIMESTAMP
         WHERE candidate_id = %s
         """
@@ -240,11 +256,13 @@ def upsert_candidate(
                 json.dumps(doc_ids, ensure_ascii=False),
                 json.dumps(titles, ensure_ascii=False),
                 json.dumps(snippets, ensure_ascii=False),
+                new_status,
                 candidate_id,
             ),
         )
         return
 
+    # 💡 INSERT 처리 부분: 마지막 파라미터가 'pending' 하드코딩에서 %s (동적 변수)로 변경됨
     sql_insert = """
     INSERT INTO term_candidate_queue
     (
@@ -264,7 +282,7 @@ def upsert_candidate(
         status,
         review_status
     )
-    VALUES ('new_term', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 'pending')
+    VALUES ('new_term', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)
     """
     cur.execute(
         sql_insert,
@@ -281,9 +299,9 @@ def upsert_candidate(
             json.dumps(_merge_samples([], incoming_doc_ids), ensure_ascii=False),
             json.dumps(_merge_samples([], incoming_titles), ensure_ascii=False),
             json.dumps(_merge_samples([], incoming_snippets), ensure_ascii=False),
+            target_review_status, # 💡 이미 사전에 있으면 already_active, 없으면 pending
         ),
     )
-
 
 def collect_candidates_from_additional(
     doc: Dict[str, Any],
@@ -313,6 +331,7 @@ def collect_candidates_from_additional(
         ("equipment_candidates", "equipment"), 
         ("analysis_candidates", "analysis"), 
     ]
+
 
     conn = get_mysql_conn()
     cur = conn.cursor()
