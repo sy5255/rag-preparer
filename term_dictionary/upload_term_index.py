@@ -390,19 +390,28 @@ def sync_once():
     save_state(state)
     print(f"[done] terms={len(terms)} docs={len(docs)} index={TERM_INDEX_NAME}")
 
-def main():
+# 1시간 주기 잡으로 실행할 때는 1회 동기화 후 종료(기본값).
+# 예전처럼 상주 실행하려면 TERM_SYNC_RUN_ONCE=false
+RUN_ONCE = os.getenv("TERM_SYNC_RUN_ONCE", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def main() -> int:
     ensure_dirs()
     print(f"[term-sync] out={OUT_ROOT}")
     print(f"[term-sync] jsonl={TERM_JSONL_PATH}")
     print(f"[term-sync] index={TERM_INDEX_NAME}")
 
     while True:
+        exit_code = 0
         try:
             sync_once()
         except Exception as e:
+            exit_code = 1
             print(f"[term-sync-error] {e}")
 
+        if RUN_ONCE:
+            return exit_code
         time.sleep(POLL_INTERVAL_SEC)
 
 if __name__ == "__main__":
-    main() 
+    raise SystemExit(main()) 

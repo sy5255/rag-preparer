@@ -43,6 +43,12 @@ PIPELINE_TEST_MYSQL_HOST=127.0.0.1 PIPELINE_TEST_MYSQL_USER=root PIPELINE_TEST_M
 
 `pipeline_state.py`는 doc-parser에도 동일한 사본이 있습니다. 수정 시 두 저장소를 함께 갱신하세요.
 
+## 용어사전 잡
+
+`term_dictionary/promote_candidate_terms.py`, `term_dictionary/upload_term_index.py`도 기본적으로 **1회 실행 후 종료**합니다.
+스케줄러에 1시간 주기로 등록하세요(`nohup` 상주 실행 불필요). 오류가 나면 종료 코드 1을 반환합니다.
+예전처럼 상주 실행하려면 `PROMOTE_RUN_ONCE=false`, `TERM_SYNC_RUN_ONCE=false`.
+
 ## 용어 승격 실패 처리
 
 `promote_candidate_terms.py`는 후보 1건씩 SAVEPOINT로 처리합니다. 실패한 후보만 `review_status='promote_failed'`가 되고
