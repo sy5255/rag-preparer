@@ -92,7 +92,7 @@ WHERE id=…;
 - [x] P2-6 stale PROCESSING 복구(attempt+1, 상한 초과 시 FAILED, 이력에 CRASHED)
 - [x] P2-7 지수 backoff, 오류 분류(`TransientError` / `PermanentError`)
 - [x] P2-8 원자적 파일 쓰기(`atomic_write_bytes/text`)와 디렉터리 게시(`.partial` → rename)
-- [x] P2-9 MySQL 호환 테스트(MariaDB로 실행)
+- [x] P2-9 MySQL 호환 테스트(MySQL 8.4 / MariaDB 10.11 양쪽에서 실행)
 
 ### Phase 3. doc-parser 전환 (PARSE 단계)
 - [x] P3-1 1시간 잡 구조: `run_once`, `GET_LOCK`, 시간 예산(기본 50분), `runner.lock` 파일 제거
@@ -109,11 +109,12 @@ WHERE id=…;
 - [x] P3-12 README(실행·스케줄러 등록·모니터링)
 
 ### Phase 4. email-ingestion 보강
-- [ ] P4-1 메일 폴더를 `.partial` 디렉터리에 완성한 뒤 rename(원자적 게시), 남은 `.partial` 정리
-- [ ] P4-2 `exists_skip`은 최종 폴더에 `.enriched.eml`이 있을 때만 성공, 아니면 불완전 폴더로 보고 재생성
-- [ ] P4-3 stale FILE_ARCHIVE 복구 시 `retry_count` 증가, 상한 도달 시 FAILED
-- [ ] P4-4 `ingest_folder.py`에서 기존 ROUTED/RETRY 행 재처리
-- [ ] P4-5 테스트
+- [x] P4-1 메일 폴더를 `.partial` 디렉터리에 완성한 뒤 rename(원자적 게시), 남은 `.partial` 정리
+- [x] P4-2 `exists_skip`은 최종 폴더에 `.enriched.eml`이 있을 때만 성공, 아니면 불완전 폴더로 보고 재생성
+- [x] P4-3 stale FILE_ARCHIVE 복구 시 `retry_count` 증가, 상한 도달 시 FAILED
+- [x] P4-4 `ingest_folder.py`에서 기존 ROUTED/RETRY 행 재처리
+- [x] P4-5 테스트
+- [x] P4-6 (추가 발견) `ingest_folder.py` 첫 줄에 파일명이 코드로 들어가 있어 실행 즉시 `NameError`로 종료되던 문제 수정
 
 ### Phase 5. rag-preparer DB 전환
 - [ ] P5-1 `pipeline_state.py` 반입
@@ -138,5 +139,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-04 | P4-1~P4-6 | email-ingestion | 메일 폴더 원자적 게시, 불완전 폴더 재생성, stale 복구 retry_count, 폴더 모드 재처리, 테스트 6건 |
+| 2026-10-04 | P2-9 | doc-parser | MySQL 8.4에서 테스트 21건 통과 확인 |
 | 2026-10-04 | P3-1~P3-12 | doc-parser | `app.py` DB 기반 1시간 잡으로 전환, `migrate_processed_json.py`, README, 테스트 9건 추가(총 21건) |
 | 2026-10-04 | P2-1~P2-9 | doc-parser | `pipeline_state.py` + MariaDB 테스트 12건 (rag-preparer에는 P5-1에서 반입) |
