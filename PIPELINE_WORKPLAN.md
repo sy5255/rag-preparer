@@ -76,11 +76,12 @@ WHERE id=…;
 - [~] P0-3 코드에 하드코딩된 자격증명(POP3/MySQL 비밀번호, RAG 키, 파싱 API 키)을 환경변수 전용으로 전환 — **운영 배포 방식 확인 후 진행**
 
 ### Phase 1. rag-preparer 긴급 패치 (기존 구조 유지, 누락 차단)
-- [ ] P1-1 `upload_jsonl_to_index`가 실패 건수를 반환하고, 실패가 1건이라도 있으면 `processed_inputs`에 기록하지 않음
-- [ ] P1-2 실패 내역을 상태 파일 `failed_docs`에 기록(오류 메시지, 시도 횟수, 마지막 시각)하고 성공 시 제거
-- [ ] P1-3 raw/full/lite 출력 파일을 임시 파일 → rename으로 원자적 저장
-- [ ] P1-4 문서 1건 업로드 성공 시마다 상태 저장(중단 시 재업로드 최소화)
-- [ ] P1-5 파일 단위 처리 실패도 `failed_inputs`에 기록
+- [x] P1-1 `upload_jsonl_to_index`가 실패 건수를 반환하고, 실패가 1건이라도 있으면 `processed_inputs`에 기록하지 않음
+- [x] P1-2 실패 내역을 상태 파일 `failed_docs`에 기록(오류 메시지, 시도 횟수, 마지막 시각)하고 성공 시 제거
+- [x] P1-3 raw/full/lite 출력 파일을 임시 파일 → rename으로 원자적 저장
+- [x] P1-4 문서 1건 업로드 성공 시마다 상태 저장(중단 시 재업로드 최소화)
+- [x] P1-5 파일 단위 처리 실패도 `failed_inputs`에 기록
+- [x] P1-6 (추가 발견) `created_time` 없는 문서는 매 실행 업로드 시각이 payload hash에 섞여 "동일 payload skip"이 동작하지 않던 문제 수정
 
 ### Phase 2. 공통 상태 모듈 `pipeline_state.py`
 - [ ] P2-1 DB 설정(환경변수 `MYSQL_*`, 기존 이름 `MYSQL_DATABASE`/`MYSQL_DB`, `MYSQL_PASSWORD`/`MYSQL_PASS` 모두 지원)
@@ -136,3 +137,4 @@ WHERE id=…;
 | 날짜 | 항목 | 저장소 | 비고 |
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
+| 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
