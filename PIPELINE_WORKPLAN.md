@@ -117,17 +117,18 @@ WHERE id=…;
 - [x] P4-6 (추가 발견) `ingest_folder.py` 첫 줄에 파일명이 코드로 들어가 있어 실행 즉시 `NameError`로 종료되던 문제 수정
 
 ### Phase 5. rag-preparer DB 전환
-- [ ] P5-1 `pipeline_state.py` 반입
-- [ ] P5-2 PREPROCESS: PARSE 결과(`output_ref`) 기반 처리, `mail_id` 기준 출력 경로, `input_hash` 비교로 재사용 판단
-- [ ] P5-3 LLM 실패 시 일시 오류로 재시도, 마지막 시도에서만 lite 대체 + `quality='DEGRADED'`
-- [ ] P5-4 PREPROCESS 완료와 같은 트랜잭션에서 CANDIDATE·UPLOAD 작업 생성
-- [ ] P5-5 CANDIDATE 단계(후보 큐 적재 실패 추적·재시도, 중복 집계 방지)
-- [ ] P5-6 UPLOAD 단계(문서 단위 claim → 전송 → 완료, payload hash 기록)
-- [ ] P5-7 기존 상태 파일 이관(업로드 성공 기록은 COMPLETED, 나머지는 PENDING → 과거 누락분 자동 재업로드)
-- [ ] P5-8 1시간 잡 진입점 `run_pipeline.py`
-- [ ] P5-9 `promote_candidate_terms.py` 행 단위 SAVEPOINT, 실패 행만 `promote_failed` 표시
-- [ ] P5-10 `upload_term_index.py` 문서 단위 상태 저장
-- [ ] P5-11 테스트
+- [x] P5-1 `pipeline_state.py` 반입
+- [x] P5-2 PREPROCESS: PARSE 결과(`output_ref`) 기반 처리, `mail_id` 기준 출력 경로, `input_hash` 비교로 재사용 판단
+- [x] P5-3 LLM 실패 시 일시 오류로 재시도, 마지막 시도에서만 lite 대체 + `quality='DEGRADED'`
+- [x] P5-4 PREPROCESS 완료와 같은 트랜잭션에서 CANDIDATE·UPLOAD 작업 생성
+- [x] P5-5 CANDIDATE 단계(후보 큐 적재 실패 추적·재시도, 중복 집계 방지)
+- [x] P5-6 UPLOAD 단계(문서 단위 claim → 전송 → 완료, payload hash 기록)
+- [x] P5-7 기존 상태 파일 이관(업로드 성공 기록은 COMPLETED, 나머지는 PENDING → 과거 누락분 자동 재업로드)
+- [x] P5-8 1시간 잡 진입점 `run_pipeline.py`
+- [x] P5-9 `promote_candidate_terms.py` 행 단위 SAVEPOINT, 실패 행만 `promote_failed` 표시
+- [x] P5-10 `upload_term_index.py` 문서 단위 상태 저장
+- [x] P5-11 테스트
+- [x] P5-12 (추가 발견) 공통 모듈: 같은 초에 heartbeat를 두 번 갱신하면 "소유권 상실"로 오판하던 문제 수정(FOUND_ROWS), doc-parser 사본 동기화
 
 ### Phase 6. 모니터링·운영
 - [ ] P6-1 모니터링 SQL 모음(`pipeline_monitoring.sql`): 단계별 현황, 재시도 후 성공, 누락 탐지, 강제 종료 실행, 장기 FAILED
@@ -139,6 +140,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-04 | P5-1~P5-12 | rag-preparer, doc-parser | `run_pipeline.py`(PREPROCESS/CANDIDATE/UPLOAD), 예전 상태 재사용, 용어 승격 SAVEPOINT, 테스트 13건(rag-preparer)·22건(doc-parser) MySQL 8.4 통과 |
 | 2026-10-04 | P4-1~P4-6 | email-ingestion | 메일 폴더 원자적 게시, 불완전 폴더 재생성, stale 복구 retry_count, 폴더 모드 재처리, 테스트 6건 |
 | 2026-10-04 | P2-9 | doc-parser | MySQL 8.4에서 테스트 21건 통과 확인 |
 | 2026-10-04 | P3-1~P3-12 | doc-parser | `app.py` DB 기반 1시간 잡으로 전환, `migrate_processed_json.py`, README, 테스트 9건 추가(총 21건) |
