@@ -56,34 +56,48 @@ def category_to_base_index(category: str) -> str:
         return INDEX_BASE_MAP[category]
     return INDEX_BASE_MAP["other"]
 
+def _empty_state() -> Dict[str, Any]:
+    return {
+        "processed_inputs": {},
+        "uploaded_docs": {},
+        "content_hash_by_doc": {},
+        # 업로드 실패 문서: key=index::doc_id
+        "failed_docs": {},
+        # 파일 단위 처리 실패: key=입력 jsonl 경로
+        "failed_inputs": {},
+    }
+
 def load_state() -> Dict[str, Any]:
     os.makedirs(OUT_ROOT, exist_ok=True)
     if not os.path.exists(STATE_FILE):
-        return {
-            "processed_inputs": {},
-            "uploaded_docs": {},
-            "content_hash_by_doc": {},
-        }
+        return _empty_state()
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             st = json.load(f)
-            st.setdefault("processed_inputs", {})
-            st.setdefault("uploaded_docs", {})
-            st.setdefault("content_hash_by_doc", {})
+            for k, v in _empty_state().items():
+                st.setdefault(k, v)
             return st
     except Exception:
-        return {
-            "processed_inputs": {},
-            "uploaded_docs": {},
-            "content_hash_by_doc": {},
-        }
+        return _empty_state()
 
 def save_state(state: Dict[str, Any]) -> None:
     tmp = STATE_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
-        
+        f.flush()
+        os.fsync(f.fileno())
+
     os.replace(tmp, STATE_FILE)
+
+def _record_failure(bucket: Dict[str, Any], key: str, error: str, **extra: Any) -> None:
+    prev = bucket.get(key) or {}
+    bucket[key] = {
+        "attempts": int(prev.get("attempts") or 0) + 1,
+        "first_failed_at": prev.get("first_failed_at") or now_kst_iso(),
+        "last_failed_at": now_kst_iso(),
+        "last_error": (error or "")[:2000],
+        **extra,
+    }
 
 def get_latest_version_dir(category_dir: str) -> str:
     max_ver = -1
@@ -177,9 +191,16 @@ def build_upload_data_obj(doc: Dict[str, Any], mode: str) -> Dict[str, Any]:
 # =========================
 # UPLOAD
 # =========================
-def upload_jsonl_to_index(jsonl_path: str, index_name: str, state: Dict[str, Any], mode: str) -> None:
+def upload_jsonl_to_index(jsonl_path: str, index_name: str, state: Dict[str, Any], mode: str) -> int:
+    """
+    jsonl의 문서를 index에 업로드하고 실패 건수를 반환합니다.
+    - 성공한 문서는 즉시 상태 파일에 저장(중단 시 재업로드 최소화)
+    - 실패한 문서는 failed_docs에 기록
+    """
     uploaded = state.setdefault("uploaded_docs", {})
     content_hash_by_doc = state.setdefault("content_hash_by_doc", {})
+    failed_docs = state.setdefault("failed_docs", {})
+    failed_count = 0
 
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for raw in f:
@@ -192,6 +213,13 @@ def upload_jsonl_to_index(jsonl_path: str, index_name: str, state: Dict[str, Any
 
             if not doc_id:
                 print(f"[upload-skip] missing doc_id in {jsonl_path}")
+                _record_failure(
+                    state.setdefault("failed_inputs", {}),
+                    f"{jsonl_path}::missing_doc_id",
+                    "document without doc_id",
+                    index=index_name,
+                )
+                # 재시도해도 성공할 수 없으므로 파일 완료를 막지는 않음(기록만 남김)
                 continue
 
             data_obj = build_upload_data_obj(doc, mode=mode)
@@ -202,12 +230,19 @@ def upload_jsonl_to_index(jsonl_path: str, index_name: str, state: Dict[str, Any
             }
 
             key = f"{index_name}::{doc_id}"
-            payload_hash = compute_payload_hash(payload)
+            # created_time이 문서에 없으면 업로드 시각으로 채워지므로 hash에서 제외
+            # (포함하면 매 실행마다 hash가 달라져 이미 올린 문서를 계속 재업로드함)
+            hash_payload = dict(payload, data=dict(data_obj, created_time=doc.get("created_time")))
+            payload_hash = compute_payload_hash(hash_payload)
 
             # ✅ 동일 doc_id + 동일 payload면 업로드 skip
             if uploaded.get(key) is True and content_hash_by_doc.get(key) == payload_hash:
+                if key in failed_docs:
+                    failed_docs.pop(key, None)
+                    save_state(state)
                 continue
 
+            error = None
             try:
                 resp = requests.post(
                     RAG_URL,
@@ -218,13 +253,21 @@ def upload_jsonl_to_index(jsonl_path: str, index_name: str, state: Dict[str, Any
                 if 200 <= resp.status_code < 300:
                     uploaded[key] = True
                     content_hash_by_doc[key] = payload_hash
+                    failed_docs.pop(key, None)
+                    save_state(state)
                 else:
-                    print(
-                        f"[upload-fail] index={index_name} doc_id={doc_id} "
-                        f"status={resp.status_code} body={resp.text[:500]}"
-                    )
+                    error = f"status={resp.status_code} body={resp.text[:500]}"
+                    print(f"[upload-fail] index={index_name} doc_id={doc_id} {error}")
             except Exception as e:
+                error = repr(e)
                 print(f"[upload-error] index={index_name} doc_id={doc_id} err={e}")
+
+            if error is not None:
+                failed_count += 1
+                _record_failure(failed_docs, key, error, source_jsonl=jsonl_path)
+                save_state(state)
+
+    return failed_count
 
 def upload_raw_full_lite_outputs(
     raw_out: str,
@@ -233,7 +276,8 @@ def upload_raw_full_lite_outputs(
     category: str,
     version_tag: str,
     state: Dict[str, Any]
-) -> None:
+) -> int:
+    """업로드 실패 문서 수를 반환합니다."""
     base = category_to_base_index(category)
 
     raw_index = f"{base}-{version_tag}-raw"
@@ -242,9 +286,11 @@ def upload_raw_full_lite_outputs(
 
     print(f"[upload] category={category}, version={version_tag} -> raw={raw_index}, full={full_index}, lite={lite_index}")
 
-    upload_jsonl_to_index(raw_out, raw_index, state, mode="raw")
-    upload_jsonl_to_index(full_out, full_index, state, mode="full")
-    upload_jsonl_to_index(lite_out, lite_index, state, mode="lite")
+    failed = 0
+    failed += upload_jsonl_to_index(raw_out, raw_index, state, mode="raw")
+    failed += upload_jsonl_to_index(full_out, full_index, state, mode="full")
+    failed += upload_jsonl_to_index(lite_out, lite_index, state, mode="lite")
+    return failed
 
 # =========================
 # MAIN LOOP
@@ -280,14 +326,35 @@ def main():
                     print(f"[preprocess-done] full={full_out}")
                     print(f"[preprocess-done] lite={lite_out}")
 
-                    upload_raw_full_lite_outputs(raw_out, full_out, lite_out, category, version_tag, state)
+                    failed = upload_raw_full_lite_outputs(raw_out, full_out, lite_out, category, version_tag, state)
+
+                    if failed:
+                        # 실패 문서가 남아 있으면 완료로 기록하지 않음 → 다음 주기에 다시 시도
+                        # (이미 성공한 문서는 uploaded_docs/payload hash로 skip됨)
+                        _record_failure(
+                            state.setdefault("failed_inputs", {}),
+                            fp,
+                            f"{failed} document upload(s) failed",
+                            signature=sig2,
+                        )
+                        save_state(state)
+                        print(f"[partial-fail] {fp} failed_docs={failed} (will retry)")
+                        continue
 
                     processed_inputs[fp] = sig2
                     state["processed_inputs"] = processed_inputs
+                    state.setdefault("failed_inputs", {}).pop(fp, None)
                     save_state(state)
                     print(f"[done] preprocess+upload: {fp}")
 
                 except Exception as e:
+                    _record_failure(
+                        state.setdefault("failed_inputs", {}),
+                        fp,
+                        repr(e),
+                        signature=sig2,
+                    )
+                    save_state(state)
                     print(f"[fail] {fp} -> {e}")
 
         except Exception as loop_e:

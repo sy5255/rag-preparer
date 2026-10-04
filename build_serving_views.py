@@ -126,13 +126,18 @@ def preprocess_jsonl_file(in_path: str) -> Tuple[str, str, str]:
             doc_lite["additionalField"] = merged_af_lite
             lite_lines.append(json.dumps(doc_lite, ensure_ascii=False))
 
-    with open(raw_out, "w", encoding="utf-8") as f:
-        f.write("\n".join(raw_lines) + ("\n" if raw_lines else ""))
-
-    with open(lite_out, "w", encoding="utf-8") as f:
-        f.write("\n".join(lite_lines) + ("\n" if lite_lines else ""))
-
-    with open(full_out, "w", encoding="utf-8") as f:
-        f.write("\n".join(full_lines) + ("\n" if full_lines else ""))
+    # 임시 파일에 쓴 뒤 rename → 중간에 끊겨도 "잘린 파일이 존재"하는 상태가 생기지 않음
+    _atomic_write_lines(raw_out, raw_lines)
+    _atomic_write_lines(lite_out, lite_lines)
+    _atomic_write_lines(full_out, full_lines)
 
     return raw_out, full_out, lite_out
+
+
+def _atomic_write_lines(path: str, lines: List[str]) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + ("\n" if lines else ""))
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
