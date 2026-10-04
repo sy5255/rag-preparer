@@ -131,17 +131,141 @@ WHERE id=…;
 - [x] P5-12 (추가 발견) 공통 모듈: 같은 초에 heartbeat를 두 번 갱신하면 "소유권 상실"로 오판하던 문제 수정(FOUND_ROWS), doc-parser 사본 동기화
 
 ### Phase 6. 모니터링·운영
-- [ ] P6-1 모니터링 SQL 모음(`pipeline_monitoring.sql`): 단계별 현황, 재시도 후 성공, 누락 탐지, 강제 종료 실행, 장기 FAILED
-- [ ] P6-2 스케줄러 등록 가이드(4개 잡 명령·최대 실행 시간)
-- [ ] P6-3 request-pipeline 문서의 미구현 기능(`FILE_ARCHIVE_MODE=NIGHT`, `--archive-only`, `SOURCE_MISSING`) 정리
+- [x] P6-1 모니터링 SQL 모음(이 문서 **부록 C**): 단계별 현황, 재시도 후 성공, 누락 탐지, 강제 종료 실행, 실패 원인
+- [x] P6-2 스케줄러 등록 가이드·전환 순서(이 문서 **부록 A, B**)
+- [x] P6-3 request-pipeline 문서의 미구현 기능(`FILE_ARCHIVE_MODE=NIGHT`, `--archive-only`, `SOURCE_MISSING`) 정리 — 문서에 "미구현" 명시
+- [x] P6-4 (추가 발견) 용어사전 잡(`promote_candidate_terms.py`, `upload_term_index.py`)도 상주 루프 → 기본 1회 실행 후 종료로 전환
 
 ## 5. 진행 기록
 | 날짜 | 항목 | 저장소 | 비고 |
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-04 | P6-1~P6-4 | 전체 | 운영 부록(스케줄러·전환 순서·모니터링 SQL, MySQL 8.4에서 실행 확인), 용어사전 잡 1회 실행화, request-pipeline 문서 정리 |
 | 2026-10-04 | P5-1~P5-12 | rag-preparer, doc-parser | `run_pipeline.py`(PREPROCESS/CANDIDATE/UPLOAD), 예전 상태 재사용, 용어 승격 SAVEPOINT, 테스트 13건(rag-preparer)·22건(doc-parser) MySQL 8.4 통과 |
 | 2026-10-04 | P4-1~P4-6 | email-ingestion | 메일 폴더 원자적 게시, 불완전 폴더 재생성, stale 복구 retry_count, 폴더 모드 재처리, 테스트 6건 |
 | 2026-10-04 | P2-9 | doc-parser | MySQL 8.4에서 테스트 21건 통과 확인 |
 | 2026-10-04 | P3-1~P3-12 | doc-parser | `app.py` DB 기반 1시간 잡으로 전환, `migrate_processed_json.py`, README, 테스트 9건 추가(총 21건) |
 | 2026-10-04 | P2-1~P2-9 | doc-parser | `pipeline_state.py` + MariaDB 테스트 12건 (rag-preparer에는 P5-1에서 반입) |
+
+## 부록 A. 스케줄러 등록
+
+모든 잡은 **1회 실행 후 종료**합니다. 실행 주기 1시간, 최대 실행 시간 59분 기준입니다.
+
+| 저장소 | 작업 디렉터리 | 실행 명령 | 비고 |
+|---|---|---|---|
+| email-ingestion | `/config/work/email-ingestion` | `python ingest_pop3.py` | `RUN_ONCE=true`(기본) |
+| request-pipeline | `/config/work/request-pipeline` | `python run_pipeline.py` | 55분 처리 + 3분 대기 후 종료 |
+| doc-parser | `/config/work/doc-parser` | `python app.py` | 시간 예산 50분 |
+| rag-preparer | `/config/work/rag-preparer` | `python run_pipeline.py` | 시간 예산 50분 |
+| rag-preparer (용어 승격) | `/config/work/rag-preparer` | `python term_dictionary/promote_candidate_terms.py` | 1회 실행 |
+| rag-preparer (용어 인덱스) | `/config/work/rag-preparer` | `python term_dictionary/upload_term_index.py` | 1회 실행 |
+
+공통 환경변수(doc-parser, rag-preparer): `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`(또는 `MYSQL_DB`),
+`MYSQL_USER`, `MYSQL_PASSWORD`(또는 `MYSQL_PASS`). 비밀번호는 필수입니다.
+
+doc-parser와 rag-preparer는 `GET_LOCK`으로 중복 실행을 막습니다. 이전 실행이 아직 돌고 있으면
+새 실행은 `exit_reason='LOCK_BUSY'`로 기록하고 바로 종료합니다.
+
+## 부록 B. 전환 순서 (운영 반영 시)
+
+1. **email-ingestion** 새 버전 배포 (스키마 변경 없음)
+2. **doc-parser**
+   1. 기존 상주 프로세스(예전 `app.py`) 중지
+   2. 환경변수 설정 후 `python migrate_processed_json.py --dry-run` → 건수 확인 → `python migrate_processed_json.py`
+   3. 스케줄러에 `python app.py` 등록 (테이블·뷰는 첫 실행 시 자동 생성)
+3. **rag-preparer**
+   1. 기존 상주 프로세스(`upload_indices.py`, 용어 스크립트 `nohup`) 중지
+   2. 스케줄러에 `python run_pipeline.py` 및 용어 잡 2개 등록
+   3. 첫 실행에서 예전 상태 파일(`_state_processed.json`)을 읽어 이미 만든 결과·업로드는 재사용하고,
+      **예전에 실패해 빠진 문서만 다시 업로드**합니다.
+   4. ⚠️ P0-2(RAG `insert-doc` 멱등성) 확인 전에는 "예전 상태 파일에 없는 문서"가 다시 전송될 수 있습니다.
+4. 부록 C의 A-5, A-6(누락 탐지) 쿼리가 0건인지 확인
+
+## 부록 C. 모니터링 SQL
+
+(MySQL 8.4에서 실행 확인)
+
+```sql
+-- A-1. 단계별 현황
+SELECT stage, status, COUNT(*) AS cnt
+FROM ae_llm_agent_pipeline_task
+GROUP BY stage, status
+ORDER BY stage, status;
+
+-- A-2. 0단계(email-ingestion) FILE_ARCHIVE 현황
+SELECT status, COUNT(*) AS cnt
+FROM ae_llm_agent_mail
+WHERE route_type = 'FILE_ARCHIVE'
+GROUP BY status;
+
+-- A-3. 재시도 끝에 성공한 작업
+SELECT id, mail_id, stage, item_key, attempt, completed_at
+FROM ae_llm_agent_pipeline_task
+WHERE status = 'COMPLETED' AND attempt > 0
+ORDER BY completed_at DESC
+LIMIT 100;
+
+-- A-4. 현재 실패/재시도 대기 작업과 원인
+SELECT id, mail_id, stage, item_key, status, attempt, max_attempt,
+       error_class, next_retry_at, LEFT(last_error, 300) AS last_error
+FROM ae_llm_agent_pipeline_task
+WHERE status IN ('RETRY', 'FAILED')
+ORDER BY status, updated_at DESC;
+
+-- A-5. 누락 탐지: 아카이브 완료됐는데 PARSE 작업이 없음 (doc-parser 실행 후 0이어야 정상)
+--      DOC_PARSER_VERSION_TAGS 대상 버전만 보려면 sharedworkspace_path 조건을 추가하세요.
+SELECT m.id, m.sharedworkspace_path, m.saved_at
+FROM ae_llm_agent_mail m
+LEFT JOIN ae_llm_agent_pipeline_task t
+       ON t.mail_id = m.id AND t.stage = 'PARSE' AND t.item_key = ''
+WHERE m.route_type = 'FILE_ARCHIVE' AND m.status = 'COMPLETED'
+  AND t.id IS NULL;
+
+-- A-6. 누락 탐지: PARSE 완료됐는데 PREPROCESS 작업이 없음 (rag-preparer 실행 후 0이어야 정상)
+SELECT p.mail_id, p.output_ref, p.completed_at
+FROM ae_llm_agent_pipeline_task p
+LEFT JOIN ae_llm_agent_pipeline_task pp
+       ON pp.mail_id = p.mail_id AND pp.stage = 'PREPROCESS' AND pp.item_key = ''
+WHERE p.stage = 'PARSE' AND p.status = 'COMPLETED' AND pp.id IS NULL;
+
+-- A-7. 작업별 시도 이력 (id를 바꿔서 조회)
+SELECT a.attempt_no, a.run_id, a.started_at, a.ended_at, a.result, LEFT(a.error, 300) AS error
+FROM ae_llm_agent_pipeline_attempt a
+WHERE a.task_id = 1
+ORDER BY a.id;
+
+-- A-8. 최근 잡 실행 기록 (KILLED = 강제 종료됨, LOCK_BUSY = 이전 실행이 아직 동작 중)
+SELECT component, run_id, started_at, finished_at, exit_reason,
+       TIMESTAMPDIFF(MINUTE, started_at, COALESCE(finished_at, NOW())) AS minutes,
+       counters_json
+FROM ae_llm_agent_pipeline_run
+ORDER BY started_at DESC
+LIMIT 50;
+
+-- A-9. 최근 2시간 동안 한 번도 실행되지 않은 잡 (스케줄러 이상 탐지)
+SELECT c.component, MAX(r.started_at) AS last_started_at
+FROM (SELECT 'doc-parser' AS component UNION ALL SELECT 'rag-preparer') c
+LEFT JOIN ae_llm_agent_pipeline_run r ON r.component = c.component
+GROUP BY c.component
+HAVING last_started_at IS NULL OR last_started_at < NOW() - INTERVAL 2 HOUR;
+
+-- A-10. 메일별 전체 진행 현황
+SELECT *
+FROM v_ae_llm_agent_pipeline_mail
+ORDER BY last_updated_at DESC
+LIMIT 100;
+
+-- A-11. LLM 대체(DEGRADED)로 처리된 메일 → 필요 시 재처리
+SELECT mail_id, completed_at
+FROM ae_llm_agent_pipeline_task
+WHERE stage = 'PREPROCESS' AND quality = 'DEGRADED';
+```
+
+수동 재시도:
+
+```sql
+UPDATE ae_llm_agent_pipeline_task
+SET status='RETRY', attempt=0, next_retry_at=NULL, last_error=NULL
+WHERE id = …;
+```
