@@ -84,15 +84,15 @@ WHERE id=…;
 - [x] P1-6 (추가 발견) `created_time` 없는 문서는 매 실행 업로드 시각이 payload hash에 섞여 "동일 payload skip"이 동작하지 않던 문제 수정
 
 ### Phase 2. 공통 상태 모듈 `pipeline_state.py`
-- [ ] P2-1 DB 설정(환경변수 `MYSQL_*`, 기존 이름 `MYSQL_DATABASE`/`MYSQL_DB`, `MYSQL_PASSWORD`/`MYSQL_PASS` 모두 지원)
-- [ ] P2-2 스키마 보장: task / attempt / run 테이블 + 진행 현황 뷰 (`CREATE … IF NOT EXISTS`)
-- [ ] P2-3 실행 컨텍스트: `GET_LOCK` 획득, run 행 기록, 종료 사유(DRAINED / TIME_BUDGET / LOCK_BUSY / ERROR), 카운터
-- [ ] P2-4 작업 API: `seed`, `claim_next`, `heartbeat`, `save_checkpoint`, `complete`, `fail`(일시/영구), `release`
-- [ ] P2-5 시도 이력 기록(`attempt` 테이블: 시작/종료/결과/오류)
-- [ ] P2-6 stale PROCESSING 복구(attempt+1, 상한 초과 시 FAILED, 이력에 CRASHED)
-- [ ] P2-7 지수 backoff, 오류 분류(`TransientError` / `PermanentError`)
-- [ ] P2-8 원자적 파일 쓰기(`atomic_write_bytes/text`)와 디렉터리 게시(`.partial` → rename)
-- [ ] P2-9 MySQL 호환 테스트(MariaDB로 실행)
+- [x] P2-1 DB 설정(환경변수 `MYSQL_*`, 기존 이름 `MYSQL_DATABASE`/`MYSQL_DB`, `MYSQL_PASSWORD`/`MYSQL_PASS` 모두 지원)
+- [x] P2-2 스키마 보장: task / attempt / run 테이블 + 진행 현황 뷰 (`CREATE … IF NOT EXISTS`)
+- [x] P2-3 실행 컨텍스트: `GET_LOCK` 획득, run 행 기록, 종료 사유(DRAINED / TIME_BUDGET / LOCK_BUSY / ERROR), 카운터
+- [x] P2-4 작업 API: `seed`, `claim_next`, `heartbeat`, `save_checkpoint`, `complete`, `fail`(일시/영구), `release`
+- [x] P2-5 시도 이력 기록(`attempt` 테이블: 시작/종료/결과/오류)
+- [x] P2-6 stale PROCESSING 복구(attempt+1, 상한 초과 시 FAILED, 이력에 CRASHED)
+- [x] P2-7 지수 backoff, 오류 분류(`TransientError` / `PermanentError`)
+- [x] P2-8 원자적 파일 쓰기(`atomic_write_bytes/text`)와 디렉터리 게시(`.partial` → rename)
+- [x] P2-9 MySQL 호환 테스트(MariaDB로 실행)
 
 ### Phase 3. doc-parser 전환 (PARSE 단계)
 - [ ] P3-1 1시간 잡 구조: `run_once`, `GET_LOCK`, 시간 예산(기본 50분), `runner.lock` 파일 제거
@@ -138,3 +138,4 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-04 | P2-1~P2-9 | doc-parser | `pipeline_state.py` + MariaDB 테스트 12건 (rag-preparer에는 P5-1에서 반입) |
