@@ -1,3 +1,55 @@
+# rag-preparer 실행 (DB 상태 추적, 1시간 주기 잡)
+
+전체 계획: [PIPELINE_WORKPLAN.md](PIPELINE_WORKPLAN.md)
+
+```bash
+export MYSQL_HOST=... MYSQL_PORT=3306 MYSQL_DB=fspas MYSQL_USER=... MYSQL_PASS=...
+python run_pipeline.py
+```
+
+사내 스케줄러: 실행 주기 1시간, 최대 실행 시간 59분, 명령 `python run_pipeline.py`.
+기본 시간 예산은 50분(`RAG_PREPARER_TIME_BUDGET_SEC`)이며 1회 실행 후 종료합니다.
+`upload_indices.py`(상주 루프)는 예전 방식이며, `run_pipeline.py`로 전환한 뒤에는 함께 실행하지 않습니다.
+
+## 단계
+
+| stage | 단위 | 하는 일 |
+|---|---|---|
+| `PREPROCESS` | 메일 1건 | doc-parser PARSE 결과(export 폴더)의 jsonl → raw/full/lite jsonl (원자적 저장) |
+| `CANDIDATE` | 메일 1건 | FULL 결과에서 용어 후보 적재 (문서 단위 진행 기록 → 중복 집계 방지) |
+| `UPLOAD` | 문서 × 인덱스 | RAG 인덱스 업로드. **문서 단위로 성공/실패/재시도 기록** |
+
+- PREPROCESS는 doc-parser의 PARSE가 COMPLETED인 메일을 자동 등록합니다. 다시 파싱되면(output_hash 변경) 다시 처리합니다.
+- LLM 실패는 재시도합니다. **마지막 시도에서만** lite 결과로 대체하고 `quality='DEGRADED'`로 표시합니다.
+- 업로드 4xx(408/429 제외)는 영구 실패, 그 외는 backoff 후 재시도합니다.
+- 예전 상태 파일 `_state_processed.json`이 있으면 이미 만든 결과·업로드는 재사용(`quality='LEGACY'`)하고,
+  **예전에 실패해 빠진 문서만 다시 업로드**합니다. 끄려면 `RAG_USE_LEGACY_STATE=false`.
+
+## 모니터링
+
+```sql
+SELECT stage, status, COUNT(*) FROM ae_llm_agent_pipeline_task GROUP BY stage, status;
+SELECT * FROM v_ae_llm_agent_pipeline_mail ORDER BY last_updated_at DESC LIMIT 50;
+SELECT item_key, attempt, error_class, last_error FROM ae_llm_agent_pipeline_task
+WHERE stage='UPLOAD' AND status IN ('RETRY','FAILED');
+SELECT mail_id, quality FROM ae_llm_agent_pipeline_task WHERE stage='PREPROCESS' AND quality='DEGRADED';
+```
+
+## 테스트
+
+```bash
+PIPELINE_TEST_MYSQL_HOST=127.0.0.1 PIPELINE_TEST_MYSQL_USER=root PIPELINE_TEST_MYSQL_PASSWORD=... python -m pytest -q tests
+```
+
+`pipeline_state.py`는 doc-parser에도 동일한 사본이 있습니다. 수정 시 두 저장소를 함께 갱신하세요.
+
+## 용어 승격 실패 처리
+
+`promote_candidate_terms.py`는 후보 1건씩 SAVEPOINT로 처리합니다. 실패한 후보만 `review_status='promote_failed'`가 되고
+원인은 `promote_error` 컬럼(없으면 자동 추가)에 남습니다. 원인을 고친 뒤 `review_status='approved'`로 되돌리면 다시 승격됩니다.
+
+---
+
 `term_candidate_queue`, `term_dictionary`, `term_candidate_queue` 컬럼 설명표와 
 `promote_candidate_terms.py` 실행/운영 방법
 

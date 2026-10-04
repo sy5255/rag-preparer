@@ -437,6 +437,40 @@ def mark_promoted(cur, candidate_id: int, term_id: int) -> None:
     cur.execute(sql, (term_id, candidate_id))
 
 
+def ensure_promote_error_column(conn) -> None:
+    """승격 실패 원인을 남길 promote_error 컬럼이 없으면 추가합니다."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'term_candidate_queue'
+              AND column_name = 'promote_error'
+            LIMIT 1
+            """
+        )
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE term_candidate_queue ADD COLUMN promote_error TEXT NULL")
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def mark_promote_failed(cur, candidate_id: int, error: str) -> None:
+    """
+    승격 중 예외가 난 후보만 promote_failed로 표시합니다.
+    원인을 고친 뒤 review_status='approved'로 되돌리면 다시 승격됩니다.
+    """
+    sql = """
+    UPDATE term_candidate_queue
+    SET review_status = 'promote_failed',
+        promote_error = %s
+    WHERE candidate_id = %s
+    """
+    cur.execute(sql, ((error or "")[:4000], candidate_id))
+
+
 def mark_needs_edit(cur, candidate_id: int) -> None:
     sql = """
     UPDATE term_candidate_queue
@@ -550,6 +584,7 @@ def promote_alias_for_existing_term(cur, row: Dict[str, Any]) -> Optional[int]:
 
 def promote_once() -> int:
     conn = get_mysql_conn()
+    ensure_promote_error_column(conn)
     cur = conn.cursor()
 
     try:
@@ -563,55 +598,16 @@ def promote_once() -> int:
         for row in rows:
             candidate_id = int(row["candidate_id"])
 
-            row = ensure_drafts_if_missing(row)
-            update_drafts(
-                cur=cur,
-                candidate_id=candidate_id,
-                draft_description=row["draft_description"],
-                draft_metadata=row["draft_metadata_json_obj"],
-            )
-
-            candidate_kind = str(row.get("candidate_kind") or "new_term").strip()
-
-            if candidate_kind == "alias_for_existing_term":
-                term_id = promote_alias_for_existing_term(cur, row)
-
-                if not term_id:
-                    mark_needs_edit(cur, candidate_id)
-                    continue
-
-                mark_promoted(cur, candidate_id, term_id)
-
-                promoted_count += 1
-                print(
-                    f"[promoted-alias] candidate_id={candidate_id} -> "
-                    f"term_id={term_id}"
-                )
-                continue
-
-            # 기본값: 신규 용어 승격
-            term_payload = build_term_payload_from_candidate(row)
-            if not term_payload:
-                mark_needs_edit(cur, candidate_id)
-                continue
-
-            term_id = upsert_term(cur, term_payload)
-
-            aliases = build_aliases_from_candidate(
-                row=row,
-                canonical_name=term_payload["canonical_name"],
-            )
-            for alias in aliases:
-                upsert_alias(cur, term_id, alias)
-
-            mark_promoted(cur, candidate_id, term_id)
-
-            promoted_count += 1
-            print(
-                f"[promoted] candidate_id={candidate_id} -> "
-                f"term_id={term_id} type={term_payload['term_type']} "
-                f"canonical={term_payload['canonical_name']}"
-            )
+            # 행 단위 SAVEPOINT: 한 후보의 실패가 같은 배치의 다른 후보 승격을 막지 않게 함
+            cur.execute("SAVEPOINT promote_candidate")
+            try:
+                if _promote_row(cur, row, candidate_id):
+                    promoted_count += 1
+                cur.execute("RELEASE SAVEPOINT promote_candidate")
+            except Exception as e:
+                cur.execute("ROLLBACK TO SAVEPOINT promote_candidate")
+                mark_promote_failed(cur, candidate_id, repr(e))
+                print(f"[promote-failed] candidate_id={candidate_id} err={e!r}")
 
         conn.commit()
         return promoted_count
@@ -622,6 +618,56 @@ def promote_once() -> int:
     finally:
         cur.close()
         conn.close()
+
+
+def _promote_row(cur, row: Dict[str, Any], candidate_id: int) -> bool:
+    """후보 1건을 승격합니다. 승격하면 True, needs_edit 처리하면 False."""
+    row = ensure_drafts_if_missing(row)
+    update_drafts(
+        cur=cur,
+        candidate_id=candidate_id,
+        draft_description=row["draft_description"],
+        draft_metadata=row["draft_metadata_json_obj"],
+    )
+
+    candidate_kind = str(row.get("candidate_kind") or "new_term").strip()
+
+    if candidate_kind == "alias_for_existing_term":
+        term_id = promote_alias_for_existing_term(cur, row)
+
+        if not term_id:
+            mark_needs_edit(cur, candidate_id)
+            return False
+
+        mark_promoted(cur, candidate_id, term_id)
+        print(
+            f"[promoted-alias] candidate_id={candidate_id} -> "
+            f"term_id={term_id}"
+        )
+        return True
+
+    # 기본값: 신규 용어 승격
+    term_payload = build_term_payload_from_candidate(row)
+    if not term_payload:
+        mark_needs_edit(cur, candidate_id)
+        return False
+
+    term_id = upsert_term(cur, term_payload)
+
+    aliases = build_aliases_from_candidate(
+        row=row,
+        canonical_name=term_payload["canonical_name"],
+    )
+    for alias in aliases:
+        upsert_alias(cur, term_id, alias)
+
+    mark_promoted(cur, candidate_id, term_id)
+    print(
+        f"[promoted] candidate_id={candidate_id} -> "
+        f"term_id={term_id} type={term_payload['term_type']} "
+        f"canonical={term_payload['canonical_name']}"
+    )
+    return True
 
 
 def main():

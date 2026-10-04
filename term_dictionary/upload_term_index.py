@@ -329,6 +329,8 @@ def upload_term_docs(docs: List[Dict[str, Any]], state: Dict[str, Any]) -> Set[s
                 uploaded[key] = True
                 content_hash_by_doc[key] = payload_hash
                 known_doc_ids[key] = True
+                # 문서 단위로 즉시 저장 → 중간에 끊겨도 이미 올린 문서는 다시 올리지 않음
+                save_state(state)
                 print(f"[uploaded] {key}")
             else:
                 print(f"[upload-fail] {key} status={resp.status_code} body={resp.text[:500]}")
@@ -365,6 +367,7 @@ def delete_stale_term_docs(current_keys: Set[str], state: Dict[str, Any]) -> Non
                 uploaded.pop(key, None)
                 content_hash_by_doc.pop(key, None)
                 known_doc_ids.pop(key, None)
+                save_state(state)
             else:
                 print(f"[delete-fail] {key} status={resp.status_code} body={resp.text[:500]}")
         except Exception as e:
