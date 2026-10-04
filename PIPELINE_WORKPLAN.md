@@ -95,18 +95,18 @@ WHERE id=…;
 - [x] P2-9 MySQL 호환 테스트(MariaDB로 실행)
 
 ### Phase 3. doc-parser 전환 (PARSE 단계)
-- [ ] P3-1 1시간 잡 구조: `run_once`, `GET_LOCK`, 시간 예산(기본 50분), `runner.lock` 파일 제거
-- [ ] P3-2 seed: `ae_llm_agent_mail` FILE_ARCHIVE COMPLETED → PARSE 작업 등록(파일 스캔·`TARGET_VERSION_TAG` 고정값 제거, 대상 version_tag는 설정값 목록)
-- [ ] P3-3 `sharedworkspace_path`에서 `*.enriched.eml` 확인, 없으면 영구 실패로 기록
-- [ ] P3-4 `create_task` 직후 `task_id`를 `external_id`에 즉시 저장, 재개 시 기존 태스크 polling 이어서 진행
-- [ ] P3-5 모든 HTTP 요청 timeout, polling 중 heartbeat, 시간 예산 소진 시 RELEASE
-- [ ] P3-6 export 검증(zip 유효성, jsonl ≥ 1개) 후 `.partial` 디렉터리에 해제 → rename
-- [ ] P3-7 jsonl 메타 주입 실패 시 예외 처리(완료로 기록하지 않음)
-- [ ] P3-8 원격 태스크 FAILED/ERROR 시 `external_id` 초기화 후 RETRY
-- [ ] P3-9 결과 경로(`output_ref`)·해시 기록, `.DONE` 마커 유지
-- [ ] P3-10 기존 `processed.json` → DB 이관 스크립트(DONE 항목을 PARSE COMPLETED로)
-- [ ] P3-11 테스트(가짜 파싱 API + MariaDB)
-- [ ] P3-12 README(실행·스케줄러 등록·모니터링)
+- [x] P3-1 1시간 잡 구조: `run_once`, `GET_LOCK`, 시간 예산(기본 50분), `runner.lock` 파일 제거
+- [x] P3-2 seed: `ae_llm_agent_mail` FILE_ARCHIVE COMPLETED → PARSE 작업 등록(파일 스캔·`TARGET_VERSION_TAG` 고정값 제거, 대상 version_tag는 설정값 목록)
+- [x] P3-3 `sharedworkspace_path`에서 `*.enriched.eml` 확인, 없으면 영구 실패로 기록
+- [x] P3-4 `create_task` 직후 `task_id`를 `external_id`에 즉시 저장, 재개 시 기존 태스크 polling 이어서 진행
+- [x] P3-5 모든 HTTP 요청 timeout, polling 중 heartbeat, 시간 예산 소진 시 RELEASE
+- [x] P3-6 export 검증(zip 유효성, jsonl ≥ 1개) 후 `.partial` 디렉터리에 해제 → rename
+- [x] P3-7 jsonl 메타 주입 실패 시 예외 처리(완료로 기록하지 않음)
+- [x] P3-8 원격 태스크 FAILED/ERROR 시 `external_id` 초기화 후 RETRY
+- [x] P3-9 결과 경로(`output_ref`)·해시 기록, `.DONE` 마커 유지
+- [x] P3-10 기존 `processed.json` → DB 이관 스크립트(DONE 항목을 PARSE COMPLETED로)
+- [x] P3-11 테스트(가짜 파싱 API + MariaDB)
+- [x] P3-12 README(실행·스케줄러 등록·모니터링)
 
 ### Phase 4. email-ingestion 보강
 - [ ] P4-1 메일 폴더를 `.partial` 디렉터리에 완성한 뒤 rename(원자적 게시), 남은 `.partial` 정리
@@ -138,4 +138,5 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-04 | P3-1~P3-12 | doc-parser | `app.py` DB 기반 1시간 잡으로 전환, `migrate_processed_json.py`, README, 테스트 9건 추가(총 21건) |
 | 2026-10-04 | P2-1~P2-9 | doc-parser | `pipeline_state.py` + MariaDB 테스트 12건 (rag-preparer에는 P5-1에서 반입) |
