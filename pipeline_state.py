@@ -195,6 +195,7 @@ _DDL = [
 # 메일 1건의 전체 진행 현황 (ae_llm_agent_mail이 있을 때만 생성)
 # - FILE_ARCHIVE : email-ingestion 아카이브 → doc-parser PARSE → rag-preparer PREPROCESS/CANDIDATE/UPLOAD
 # - API_ANALYSIS : request-pipeline 분석(status) → 메일 발송(send_status)
+# - CONFLICT     : 같은 우선순위 규칙이 여러 개 매칭되어 사람이 확인해야 하는 메일
 # current_step 은 "지금 어디에 있는지"를 한 값으로 요약합니다. (예: PARSE:RETRY, SEND:SENT, DONE)
 _UPLOAD_COUNT = (
     "(SELECT COUNT(*) FROM `{task}` u WHERE u.mail_id = m.id AND u.stage = 'UPLOAD'{extra})"
@@ -217,6 +218,7 @@ SELECT
     m.retry_count AS mail_retry_count,
     m.last_error AS mail_last_error,
     CASE
+        WHEN m.route_type = 'CONFLICT' THEN 'CONFLICT'
         WHEN m.route_type = 'API_ANALYSIS' THEN
             CASE WHEN m.status <> 'COMPLETED' THEN CONCAT('ANALYSIS:', m.status)
                  WHEN m.send_status = 'SENT' THEN 'DONE'
@@ -251,6 +253,9 @@ SELECT
     CASE WHEN m.route_type = 'API_ANALYSIS' THEN m.send_status END AS send_status,
     CASE WHEN m.route_type = 'API_ANALYSIS' THEN m.sent_at END AS sent_at,
 
+    -- CONFLICT (규칙 충돌 사유)
+    CASE WHEN m.route_type = 'CONFLICT' THEN m.route_reason END AS conflict_reason,
+
     GREATEST(
         COALESCE(m.updated_at, '1970-01-01'),
         COALESCE(p.updated_at, '1970-01-01'),
@@ -261,7 +266,7 @@ FROM `{MAIL_TABLE}` m
 LEFT JOIN `{TASK_TABLE}` p  ON p.mail_id = m.id  AND p.stage = 'PARSE'      AND p.item_key = ''
 LEFT JOIN `{TASK_TABLE}` pp ON pp.mail_id = m.id AND pp.stage = 'PREPROCESS' AND pp.item_key = ''
 LEFT JOIN `{TASK_TABLE}` c  ON c.mail_id = m.id  AND c.stage = 'CANDIDATE'  AND c.item_key = ''
-WHERE m.route_type IN ('FILE_ARCHIVE', 'API_ANALYSIS')
+WHERE m.route_type IN ('FILE_ARCHIVE', 'API_ANALYSIS', 'CONFLICT')
 """
 
 
