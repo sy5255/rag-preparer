@@ -114,7 +114,7 @@ WHERE id=…;
 - [x] P4-3 stale FILE_ARCHIVE 복구 시 `retry_count` 증가, 상한 도달 시 FAILED
 - [x] P4-4 `ingest_folder.py`에서 기존 ROUTED/RETRY 행 재처리
 - [x] P4-5 테스트
-- [x] P4-6 (추가 발견) `ingest_folder.py` 첫 줄에 파일명이 코드로 들어가 있어 실행 즉시 `NameError`로 종료되던 문제 수정
+- [x] P4-6 ~~`ingest_folder.py` 첫 줄 파일명 삭제~~ → **되돌림**: 첫 줄 파일명은 init 모드(최초 세팅 전용) 마커이므로 유지. 테스트는 그 줄을 건너뛰고 불러옴
 
 ### Phase 5. rag-preparer DB 전환
 - [x] P5-1 `pipeline_state.py` 반입
@@ -141,6 +141,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-06 | P4-6 | email-ingestion | `ingest_folder.py` 첫 줄(init 모드 마커) 복원. P4-4 처리 로직 변경은 유지 |
 | 2026-10-04 | P6-1~P6-4 | 전체 | 운영 부록(스케줄러·전환 순서·모니터링 SQL, MySQL 8.4에서 실행 확인), 용어사전 잡 1회 실행화, request-pipeline 문서 정리 |
 | 2026-10-04 | P5-1~P5-12 | rag-preparer, doc-parser | `run_pipeline.py`(PREPROCESS/CANDIDATE/UPLOAD), 예전 상태 재사용, 용어 승격 SAVEPOINT, 테스트 13건(rag-preparer)·22건(doc-parser) MySQL 8.4 통과 |
 | 2026-10-04 | P4-1~P4-6 | email-ingestion | 메일 폴더 원자적 게시, 불완전 폴더 재생성, stale 복구 retry_count, 폴더 모드 재처리, 테스트 6건 |
