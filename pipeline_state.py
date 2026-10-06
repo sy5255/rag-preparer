@@ -192,14 +192,48 @@ _DDL = [
     """,
 ]
 
-# 메일 1건의 단계별 진행 현황 (ae_llm_agent_mail이 있을 때만 생성)
+# 메일 1건의 전체 진행 현황 (ae_llm_agent_mail이 있을 때만 생성)
+# - FILE_ARCHIVE : email-ingestion 아카이브 → doc-parser PARSE → rag-preparer PREPROCESS/CANDIDATE/UPLOAD
+# - API_ANALYSIS : request-pipeline 분석(status) → 메일 발송(send_status)
+# current_step 은 "지금 어디에 있는지"를 한 값으로 요약합니다. (예: PARSE:RETRY, SEND:SENT, DONE)
+_UPLOAD_COUNT = (
+    "(SELECT COUNT(*) FROM `{task}` u WHERE u.mail_id = m.id AND u.stage = 'UPLOAD'{extra})"
+)
+
+
+def _upload_count(extra: str = "") -> str:
+    return _UPLOAD_COUNT.format(task=TASK_TABLE, extra=extra)
+
+
 _VIEW_DDL = f"""
 CREATE OR REPLACE VIEW `{MAIL_VIEW}` AS
 SELECT
     m.id AS mail_id,
-    m.original_subject,
+    m.route_type,
     m.route_case,
-    m.status AS archive_status,
+    m.original_subject,
+    m.received_at,
+    m.status AS mail_status,
+    m.retry_count AS mail_retry_count,
+    m.last_error AS mail_last_error,
+    CASE
+        WHEN m.route_type = 'API_ANALYSIS' THEN
+            CASE WHEN m.status <> 'COMPLETED' THEN CONCAT('ANALYSIS:', m.status)
+                 WHEN m.send_status = 'SENT' THEN 'DONE'
+                 ELSE CONCAT('SEND:', m.send_status) END
+        WHEN m.status <> 'COMPLETED' THEN CONCAT('ARCHIVE:', m.status)
+        WHEN p.id IS NULL THEN 'PARSE:NOT_SEEDED'
+        WHEN p.status <> 'COMPLETED' THEN CONCAT('PARSE:', p.status)
+        WHEN pp.id IS NULL THEN 'PREPROCESS:NOT_SEEDED'
+        WHEN pp.status <> 'COMPLETED' THEN CONCAT('PREPROCESS:', pp.status)
+        WHEN {_upload_count(" AND u.status = 'FAILED'")} > 0 THEN 'UPLOAD:FAILED'
+        WHEN {_upload_count(" AND u.status <> 'COMPLETED'")} > 0 THEN 'UPLOAD:IN_PROGRESS'
+        WHEN c.status IS NOT NULL AND c.status <> 'COMPLETED' THEN CONCAT('CANDIDATE:', c.status)
+        ELSE 'DONE'
+    END AS current_step,
+
+    -- FILE_ARCHIVE 흐름
+    CASE WHEN m.route_type = 'FILE_ARCHIVE' THEN m.status END AS archive_status,
     m.sharedworkspace_path,
     p.status AS parse_status,
     p.attempt AS parse_attempt,
@@ -208,22 +242,26 @@ SELECT
     pp.quality AS preprocess_quality,
     pp.last_error AS preprocess_error,
     c.status AS candidate_status,
-    (SELECT COUNT(*) FROM `{TASK_TABLE}` u
-      WHERE u.mail_id = m.id AND u.stage = 'UPLOAD') AS upload_total,
-    (SELECT COUNT(*) FROM `{TASK_TABLE}` u
-      WHERE u.mail_id = m.id AND u.stage = 'UPLOAD' AND u.status = 'COMPLETED') AS upload_completed,
-    (SELECT COUNT(*) FROM `{TASK_TABLE}` u
-      WHERE u.mail_id = m.id AND u.stage = 'UPLOAD' AND u.status = 'FAILED') AS upload_failed,
+    {_upload_count()} AS upload_total,
+    {_upload_count(" AND u.status = 'COMPLETED'")} AS upload_completed,
+    {_upload_count(" AND u.status = 'FAILED'")} AS upload_failed,
+
+    -- API_ANALYSIS 흐름 (request-pipeline)
+    CASE WHEN m.route_type = 'API_ANALYSIS' THEN m.status END AS analysis_status,
+    CASE WHEN m.route_type = 'API_ANALYSIS' THEN m.send_status END AS send_status,
+    CASE WHEN m.route_type = 'API_ANALYSIS' THEN m.sent_at END AS sent_at,
+
     GREATEST(
         COALESCE(m.updated_at, '1970-01-01'),
         COALESCE(p.updated_at, '1970-01-01'),
-        COALESCE(pp.updated_at, '1970-01-01')
+        COALESCE(pp.updated_at, '1970-01-01'),
+        COALESCE(c.updated_at, '1970-01-01')
     ) AS last_updated_at
 FROM `{MAIL_TABLE}` m
 LEFT JOIN `{TASK_TABLE}` p  ON p.mail_id = m.id  AND p.stage = 'PARSE'      AND p.item_key = ''
 LEFT JOIN `{TASK_TABLE}` pp ON pp.mail_id = m.id AND pp.stage = 'PREPROCESS' AND pp.item_key = ''
 LEFT JOIN `{TASK_TABLE}` c  ON c.mail_id = m.id  AND c.stage = 'CANDIDATE'  AND c.item_key = ''
-WHERE m.route_type = 'FILE_ARCHIVE'
+WHERE m.route_type IN ('FILE_ARCHIVE', 'API_ANALYSIS')
 """
 
 
