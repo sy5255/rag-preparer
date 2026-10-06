@@ -38,7 +38,7 @@ email-ingestion ──▶ doc-parser ──▶ rag-preparer
 - `ae_llm_agent_pipeline_task` : 단계별 작업 단위의 현재 상태. `UNIQUE(mail_id, stage, item_key)`
 - `ae_llm_agent_pipeline_attempt` : 시도 이력(append-only). 재시도 후 성공 여부 확인용
 - `ae_llm_agent_pipeline_run` : 잡 실행 기록. 강제 종료 여부(finished_at NULL) 확인용
-- `v_ae_llm_agent_pipeline_mail` : 메일 1건의 전체 단계 진행 상황 뷰 (FILE_ARCHIVE + API_ANALYSIS, `current_step`으로 현재 위치 요약)
+- `v_ae_llm_agent_pipeline_mail` : 메일 1건의 전체 단계 진행 상황 뷰 (FILE_ARCHIVE + API_ANALYSIS + CONFLICT, `current_step`으로 현재 위치 요약)
 
 ### 3.3 단계(stage)
 | stage | 담당 | 단위 | item_key | seed 조건 |
@@ -136,12 +136,15 @@ WHERE id=…;
 - [x] P6-3 request-pipeline 문서의 미구현 기능(`FILE_ARCHIVE_MODE=NIGHT`, `--archive-only`, `SOURCE_MISSING`) 정리 — 문서에 "미구현" 명시
 - [x] P6-4 (추가 발견) 용어사전 잡(`promote_candidate_terms.py`, `upload_term_index.py`)도 상주 루프 → 기본 1회 실행 후 종료로 전환
 - [x] P6-5 진행 현황 뷰에 API_ANALYSIS(request-pipeline) 흐름 포함: `route_type`, `analysis_status`, `send_status`, `sent_at`, 현재 위치 요약 `current_step` 추가
+- [x] P6-6 진행 현황 뷰에 CONFLICT(규칙 충돌) 메일 포함: `current_step='CONFLICT'`, `conflict_reason`
+- [x] P6-7 운영 환경 검증 가이드(이 문서 **부록 D**)
 
 ## 5. 진행 기록
 | 날짜 | 항목 | 저장소 | 비고 |
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-06 | P6-6, P6-7 | 전체 | 뷰에 CONFLICT 포함, 운영 검증 가이드(부록 D) |
 | 2026-10-06 | P6-5 | doc-parser, rag-preparer | 뷰 확장(API_ANALYSIS 포함, `current_step`), 테스트 23건(doc-parser)·13건(rag-preparer) MySQL 8.4 통과 |
 | 2026-10-06 | P4-6 | email-ingestion | `ingest_folder.py` 첫 줄(init 모드 마커) 복원. P4-4 처리 로직 변경은 유지 |
 | 2026-10-04 | P6-1~P6-4 | 전체 | 운영 부록(스케줄러·전환 순서·모니터링 SQL, MySQL 8.4에서 실행 확인), 용어사전 잡 1회 실행화, request-pipeline 문서 정리 |
@@ -290,4 +293,126 @@ WHERE id = …;
 | FILE_ARCHIVE | `CANDIDATE:<status>` | 업로드 완료, 용어 후보 적재 미완료 |
 | API_ANALYSIS | `ANALYSIS:<status>` | request-pipeline 분석 미완료 (ROUTED / PROCESSING / RETRY / FAILED) |
 | API_ANALYSIS | `SEND:<send_status>` | 분석 완료, 메일 미발송 (SEND_BLOCKED / SEND_PENDING / SENDING / SEND_UNKNOWN / SEND_DROPPED) |
+| CONFLICT | `CONFLICT` | 같은 우선순위 규칙이 여러 개 매칭됨. 사유는 `conflict_reason`. 규칙 수정 후 수동 처리 필요 |
 | 공통 | `DONE` | 전체 완료 |
+
+## 부록 D. 운영 환경 검증 가이드
+
+> 순서대로 진행합니다. **⛔ 표시는 "결과가 다르면 다음 단계로 넘어가지 말고 멈출 지점"** 입니다.
+> 테스트용 메일·인덱스가 있으면 그것으로 먼저 확인하세요.
+
+### D-0. 공통 준비
+
+- [ ] 각 서버에서 `git checkout claude/pipeline-state-tracking` (또는 PR 병합 후 main)
+- [ ] `pip install mysql-connector-python` (doc-parser, rag-preparer 서버)
+- [ ] 환경변수: `MYSQL_HOST` `MYSQL_PORT` `MYSQL_DATABASE`(또는 `MYSQL_DB`) `MYSQL_USER` `MYSQL_PASSWORD`(또는 `MYSQL_PASS`)
+- [ ] ⛔ MySQL 버전과 권한 확인
+  ```sql
+  SELECT VERSION();          -- 8.0 이상 권장 (테스트는 8.4에서 통과)
+  SHOW GRANTS;               -- CREATE, CREATE VIEW, ALTER, INSERT, UPDATE, SELECT 필요
+  ```
+  권한이 없으면 첫 실행에서 테이블·뷰 생성이 실패합니다.
+- [ ] (권장) 운영 DB 백업. 새 테이블 3개·뷰 1개를 만들고, `term_candidate_queue`에 `promote_error` 컬럼을 추가합니다. 기존 테이블 구조는 바꾸지 않습니다.
+- [ ] (코드를 수정한 경우) 운영 DB가 아닌 **테스트용 MySQL**에서 단위 테스트 실행. 테스트는 임시 database를 만들고 지우므로 `CREATE`/`DROP DATABASE` 권한이 있는 계정이 필요합니다.
+  ```bash
+  PIPELINE_TEST_MYSQL_HOST=... PIPELINE_TEST_MYSQL_PORT=3306 PIPELINE_TEST_MYSQL_USER=... PIPELINE_TEST_MYSQL_PASSWORD=... \
+    python -m pytest -q tests
+  ```
+  기대 결과: doc-parser 23개 · rag-preparer 13개 · email-ingestion 6개 통과.
+  request-pipeline 기존 테스트 3개(`test_run_recovery.py`)는 main에서도 실패하는 기존 문제입니다.
+
+### D-1. email-ingestion
+
+변경점: 메일 폴더 원자적 게시(`.partial` → rename), 불완전 폴더 재생성, 멈춘 작업 복구 시 `retry_count` 증가, 폴더 모드 RETRY 재처리.
+
+- [ ] **정상 수집**: `python ingest_pop3.py` 1회 실행
+  - 새 FILE_ARCHIVE 메일이 `status='COMPLETED'`이고, 폴더 안에 `*.enriched.eml`, `*.txt`, `attachments/`가 있는지
+  - ⛔ 남은 임시 폴더가 없어야 함: `find /config/work/sharedworkspace/mail_archive -name "*.partial"` → 결과 없음
+  - 저장 경로 형식(`{키워드}/{verN}/{날짜}__{제목}__{suffix}`)이 예전과 같은지
+- [ ] **불완전 폴더 재생성** (테스트 메일 1건으로)
+  1. COMPLETED 메일 1건의 폴더에서 `*.enriched.eml`을 다른 곳으로 옮김
+  2. `UPDATE ae_llm_agent_mail SET status='RETRY' WHERE id=<id>;`
+  3. `python ingest_pop3.py` → 폴더가 다시 만들어지고 `*.enriched.eml`이 생기며 COMPLETED
+  4. `mail_archive/.../skipped.log`에 `reason=incomplete_rebuild` 기록
+- [ ] **멈춘 작업 복구**
+  ```sql
+  UPDATE ae_llm_agent_mail
+  SET status='PROCESSING', updated_at=NOW() - INTERVAL 1 HOUR
+  WHERE id=<테스트 메일 id>;
+  ```
+  → 실행 후 `status='RETRY'`, `retry_count`가 1 증가 (`MAX_RETRY_COUNT` 도달 시 `FAILED`)
+- [ ] **폴더 모드(init)**: 평소 방식으로 `ingest_folder.py` 실행 시 이미 DB에 있는 ROUTED/RETRY 행이 다시 저장되는지
+
+### D-2. doc-parser
+
+변경점: DB에서 일감 등록(파일 스캔 제거), 원격 task_id 즉시 저장·이어서 확인, zip 검증, `.partial` 게시, 1회 실행 후 종료.
+
+- [ ] 기존 상주 `app.py` 프로세스 중지
+- [ ] ⛔ **이관 dry-run**: `python migrate_processed_json.py --dry-run`
+  - `done_items` ≈ `migrated`여야 정상
+  - `mail_row_not_found`가 많으면 `processed.json`의 경로와 DB `sharedworkspace_path` 형식이 다른 것입니다(심볼릭 링크, 마운트 경로 차이 등). **이 상태로 진행하면 이미 처리한 메일을 전부 다시 파싱합니다.** 멈추고 예시 경로 2~3개를 공유해 주세요.
+- [ ] `python migrate_processed_json.py` 실행
+- [ ] **첫 실행은 짧게**: `DOC_PARSER_TIME_BUDGET_SEC=600 python app.py`
+  - ⛔ 로그 `seeded=`와 `remote_created`가 **이관되지 않은 신규 메일 수 정도**인지 확인. 예전에 처리한 메일까지 다시 제출하면 즉시 중지
+  - 실행 기록:
+    ```sql
+    SELECT * FROM ae_llm_agent_pipeline_run WHERE component='doc-parser' ORDER BY started_at DESC LIMIT 3;
+    ```
+    `exit_reason`이 `DRAINED` 또는 `TIME_BUDGET`
+  - `parsing_archive/.../export_{task_id}/`가 생기고, `*.partial` 폴더가 남지 않음
+  - 결과 jsonl의 `additionalField.storage.parsed_export_dir_rel_path`, `parsed_md_rel_path`, `assets`가 예전과 같은 형식인지
+- [ ] **이어서 처리(재개) 확인**: 원격 태스크를 기다리는 중에 `kill -9 <pid>` → 다음 `python app.py` 실행에서
+  - 로그 `recovered orphan PARSE tasks count=1`, `resume remote task ... remote=<같은 task_id>`
+  - 파싱 API 쪽에 **새 태스크가 생기지 않음**
+  - 해당 작업 `attempt=1`, `ae_llm_agent_pipeline_attempt`에 `CRASHED` 기록
+  - 이전 실행의 `exit_reason='KILLED'`
+- [ ] **중복 실행 방지**: 두 터미널에서 동시에 `python app.py` → 하나는 `another doc-parser run is active; skipped`, run 테이블에 `LOCK_BUSY`
+- [ ] 스케줄러 등록 (부록 A)
+
+### D-3. rag-preparer
+
+변경점: `run_pipeline.py`가 PREPROCESS/CANDIDATE/UPLOAD를 DB로 처리, 문서 단위 업로드 추적, 예전 상태 재사용, LLM 실패 재시도, 용어 잡 1회 실행.
+
+- [ ] ⛔ **P0-2 먼저 확인**: 테스트 인덱스에 같은 `doc_id` 문서를 두 번 `insert-doc` → 검색 결과가 1건(덮어쓰기)인지 2건(중복)인지 확인. 중복이면 진행하지 말고 알려주세요(삭제 후 삽입으로 바꿔야 함).
+- [ ] 기존 `upload_indices.py`, `nohup` 용어 스크립트 중지
+- [ ] `preprocessed_jsonl/_state_processed.json` 백업
+- [ ] doc-parser가 최소 1회 실행되어 PARSE `COMPLETED` 행이 있는지 확인
+- [ ] **첫 실행은 짧게**: `RAG_PREPARER_TIME_BUDGET_SEC=600 python run_pipeline.py`
+  - ⛔ 종료 로그 `counters`에서 `legacy_preprocess_reused`가 대부분이어야 정상. **`preprocess_completed`는 많은데 `legacy_preprocess_reused`가 0이면 이미 처리한 문서를 LLM으로 전부 다시 처리하는 중입니다(비용 발생). 즉시 중지하고 알려주세요.** (예전 상태 파일의 jsonl 경로·크기·수정시각이 현재 파일과 다를 때 생깁니다)
+  - `legacy_upload_skipped` = 예전에 성공한 업로드 수, `upload_completed` = 예전에 실패해 빠졌던 문서 + 신규 문서
+  - `preprocessed_jsonl/` 아래 `__raw/__full/__lite.jsonl` 경로·형식이 예전과 같은지, `.tmp` 파일이 남지 않는지
+- [ ] **업로드 실패 추적**: 일부러 실패를 만들기 어렵다면 실행 후 아래로 확인
+  ```sql
+  SELECT item_key, status, attempt, LEFT(last_error,200)
+  FROM ae_llm_agent_pipeline_task
+  WHERE stage='UPLOAD' AND status IN ('RETRY','FAILED');
+  ```
+  RETRY 건은 `next_retry_at` 이후 다음 실행에서 해당 문서만 다시 전송되는지
+- [ ] **LLM 실패 처리**: LLM 장애 시 PREPROCESS가 `RETRY`(오류에 LLM 메시지)가 되고, 최대 횟수의 마지막 시도에서만 `quality='DEGRADED'`로 완료되는지 (부록 C A-11)
+- [ ] **재개**: 실행 중 `kill -9` → 다음 실행 로그 `recovered=` ≥ 1, 해당 작업이 이어서 완료
+- [ ] **용어 잡**:
+  - `python term_dictionary/promote_candidate_terms.py` → 1회 실행 후 종료, 종료 코드 0, `term_candidate_queue.promote_error` 컬럼 생성
+  - `python term_dictionary/upload_term_index.py` → 1회 실행 후 종료
+- [ ] 스케줄러 등록 (부록 A)
+
+### D-4. request-pipeline
+
+코드 변경 없음(문서만 수정). 뷰에서 이 흐름이 제대로 보이는지만 확인합니다.
+
+- [ ] `current_step`이 실제 상태와 맞는지
+  ```sql
+  SELECT mail_id, analysis_status, send_status, current_step
+  FROM v_ae_llm_agent_pipeline_mail
+  WHERE route_type='API_ANALYSIS'
+  ORDER BY mail_id DESC LIMIT 20;
+  ```
+  예: `RETRY` → `ANALYSIS:RETRY`, `COMPLETED` + `SEND_BLOCKED` → `SEND:SEND_BLOCKED`, `SENT` → `DONE`
+- [ ] CONFLICT 메일이 `current_step='CONFLICT'`, `conflict_reason`과 함께 보이는지
+
+### D-5. 통합 확인 (전환 후 24시간)
+
+- [ ] 부록 C **A-5, A-6(누락 탐지) = 0건**
+- [ ] **A-9(실행 안 된 잡) = 0건** — 스케줄러가 매시간 돌고 있음
+- [ ] **A-8**에서 `KILLED`가 반복되지 않음. 반복되면 스케줄러 최대 실행 시간이 시간 예산(50분)보다 짧은 것이므로 `*_TIME_BUDGET_SEC`를 줄이세요
+- [ ] **A-12(현재 위치별 건수)** 에서 `DONE` 외 값이 시간이 지나며 줄어드는지
+- [ ] **A-4**의 FAILED 원인 확인 → 원인 해결 후 수동 재시도
