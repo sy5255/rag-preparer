@@ -38,7 +38,7 @@ email-ingestion ──▶ doc-parser ──▶ rag-preparer
 - `ae_llm_agent_pipeline_task` : 단계별 작업 단위의 현재 상태. `UNIQUE(mail_id, stage, item_key)`
 - `ae_llm_agent_pipeline_attempt` : 시도 이력(append-only). 재시도 후 성공 여부 확인용
 - `ae_llm_agent_pipeline_run` : 잡 실행 기록. 강제 종료 여부(finished_at NULL) 확인용
-- `v_ae_llm_agent_pipeline_mail` : 메일 1건의 전체 단계 진행 상황 뷰
+- `v_ae_llm_agent_pipeline_mail` : 메일 1건의 전체 단계 진행 상황 뷰 (FILE_ARCHIVE + API_ANALYSIS, `current_step`으로 현재 위치 요약)
 
 ### 3.3 단계(stage)
 | stage | 담당 | 단위 | item_key | seed 조건 |
@@ -135,12 +135,14 @@ WHERE id=…;
 - [x] P6-2 스케줄러 등록 가이드·전환 순서(이 문서 **부록 A, B**)
 - [x] P6-3 request-pipeline 문서의 미구현 기능(`FILE_ARCHIVE_MODE=NIGHT`, `--archive-only`, `SOURCE_MISSING`) 정리 — 문서에 "미구현" 명시
 - [x] P6-4 (추가 발견) 용어사전 잡(`promote_candidate_terms.py`, `upload_term_index.py`)도 상주 루프 → 기본 1회 실행 후 종료로 전환
+- [x] P6-5 진행 현황 뷰에 API_ANALYSIS(request-pipeline) 흐름 포함: `route_type`, `analysis_status`, `send_status`, `sent_at`, 현재 위치 요약 `current_step` 추가
 
 ## 5. 진행 기록
 | 날짜 | 항목 | 저장소 | 비고 |
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-06 | P6-5 | doc-parser, rag-preparer | 뷰 확장(API_ANALYSIS 포함, `current_step`), 테스트 23건(doc-parser)·13건(rag-preparer) MySQL 8.4 통과 |
 | 2026-10-06 | P4-6 | email-ingestion | `ingest_folder.py` 첫 줄(init 모드 마커) 복원. P4-4 처리 로직 변경은 유지 |
 | 2026-10-04 | P6-1~P6-4 | 전체 | 운영 부록(스케줄러·전환 순서·모니터링 SQL, MySQL 8.4에서 실행 확인), 용어사전 잡 1회 실행화, request-pipeline 문서 정리 |
 | 2026-10-04 | P5-1~P5-12 | rag-preparer, doc-parser | `run_pipeline.py`(PREPROCESS/CANDIDATE/UPLOAD), 예전 상태 재사용, 용어 승격 SAVEPOINT, 테스트 13건(rag-preparer)·22건(doc-parser) MySQL 8.4 통과 |
@@ -251,11 +253,17 @@ LEFT JOIN ae_llm_agent_pipeline_run r ON r.component = c.component
 GROUP BY c.component
 HAVING last_started_at IS NULL OR last_started_at < NOW() - INTERVAL 2 HOUR;
 
--- A-10. 메일별 전체 진행 현황
-SELECT *
+-- A-10. 메일별 전체 진행 현황 (FILE_ARCHIVE + API_ANALYSIS)
+SELECT mail_id, route_type, original_subject, current_step, last_updated_at
 FROM v_ae_llm_agent_pipeline_mail
 ORDER BY last_updated_at DESC
 LIMIT 100;
+
+-- A-12. 현재 위치별 건수 (DONE이 아닌 것이 어디에 몰려 있는지)
+SELECT route_type, current_step, COUNT(*) AS cnt
+FROM v_ae_llm_agent_pipeline_mail
+GROUP BY route_type, current_step
+ORDER BY route_type, cnt DESC;
 
 -- A-11. LLM 대체(DEGRADED)로 처리된 메일 → 필요 시 재처리
 SELECT mail_id, completed_at
@@ -270,3 +278,16 @@ UPDATE ae_llm_agent_pipeline_task
 SET status='RETRY', attempt=0, next_retry_at=NULL, last_error=NULL
 WHERE id = …;
 ```
+
+### current_step 값
+
+| route_type | current_step | 의미 |
+|---|---|---|
+| FILE_ARCHIVE | `ARCHIVE:<status>` | email-ingestion 아카이브 미완료 (ROUTED / PROCESSING / RETRY / FAILED) |
+| FILE_ARCHIVE | `PARSE:NOT_SEEDED` | 아카이브 완료, PARSE 작업 미등록 (doc-parser 미실행 또는 대상 버전 아님) |
+| FILE_ARCHIVE | `PARSE:<status>` / `PREPROCESS:<status>` | 해당 단계 진행 중 또는 실패 |
+| FILE_ARCHIVE | `UPLOAD:FAILED` / `UPLOAD:IN_PROGRESS` | 업로드 문서 중 실패 있음 / 남은 문서 있음 |
+| FILE_ARCHIVE | `CANDIDATE:<status>` | 업로드 완료, 용어 후보 적재 미완료 |
+| API_ANALYSIS | `ANALYSIS:<status>` | request-pipeline 분석 미완료 (ROUTED / PROCESSING / RETRY / FAILED) |
+| API_ANALYSIS | `SEND:<send_status>` | 분석 완료, 메일 미발송 (SEND_BLOCKED / SEND_PENDING / SENDING / SEND_UNKNOWN / SEND_DROPPED) |
+| 공통 | `DONE` | 전체 완료 |
