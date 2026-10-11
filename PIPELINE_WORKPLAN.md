@@ -73,7 +73,7 @@ WHERE id=…;
 ### Phase 0. 준비
 - [x] P0-1 작업계획서를 4개 저장소에 배포
 - [~] P0-2 RAG `insert-doc` API가 같은 `doc_id` 재전송 시 덮어쓰는지(멱등) 확인 — **사용자 확인 필요**. 추가 적재 방식이면 재업로드 전 삭제 호출 필요
-- [~] P0-3 코드에 하드코딩된 자격증명(POP3/MySQL 비밀번호, RAG 키, 파싱 API 키)을 환경변수 전용으로 전환 — **운영 배포 방식 확인 후 진행**
+- [~] P0-3 DB 접속 정보 통일: 4개 저장소의 주소·포트·DB·계정 기본값을 공유 DB(`10.172.127.210:3306` / `fspas` / `dbuser`)로 맞춤 ✅. **비밀번호는 공개 저장소 코드에 넣지 않고 `.env`(git 제외)로 받음** — doc-parser `.env.example` 추가, `app.py`가 `.env` 자동 로딩. 나머지 자격증명(POP3 비밀번호, RAG 키, 파싱 API 키) 정리는 결정 필요
 
 ### Phase 1. rag-preparer 긴급 패치 (기존 구조 유지, 누락 차단)
 - [x] P1-1 `upload_jsonl_to_index`가 실패 건수를 반환하고, 실패가 1건이라도 있으면 `processed_inputs`에 기록하지 않음
@@ -144,6 +144,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-11 | P0-3(일부) | 전체 | DB 주소·DB·계정 기본값 통일, doc-parser `.env` 자동 로딩 + `.env.example` |
 | 2026-10-06 | P6-6, P6-7 | 전체 | 뷰에 CONFLICT 포함, 운영 검증 가이드(부록 D) |
 | 2026-10-06 | P6-5 | doc-parser, rag-preparer | 뷰 확장(API_ANALYSIS 포함, `current_step`), 테스트 23건(doc-parser)·13건(rag-preparer) MySQL 8.4 통과 |
 | 2026-10-06 | P4-6 | email-ingestion | `ingest_folder.py` 첫 줄(init 모드 마커) 복원. P4-4 처리 로직 변경은 유지 |
@@ -167,8 +168,8 @@ WHERE id=…;
 | rag-preparer (용어 승격) | `/config/work/rag-preparer` | `python term_dictionary/promote_candidate_terms.py` | 1회 실행 |
 | rag-preparer (용어 인덱스) | `/config/work/rag-preparer` | `python term_dictionary/upload_term_index.py` | 1회 실행 |
 
-공통 환경변수(doc-parser, rag-preparer): `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`(또는 `MYSQL_DB`),
-`MYSQL_USER`, `MYSQL_PASSWORD`(또는 `MYSQL_PASS`). 비밀번호는 필수입니다.
+DB 접속 주소·DB·계정 기본값은 4개 저장소 모두 공유 DB(`10.172.127.210:3306`, `fspas`, `dbuser`)입니다.
+doc-parser는 `cp .env.example .env` 후 `.env`의 `MYSQL_PASSWORD`만 채우면 `python app.py`로 실행됩니다.
 
 doc-parser와 rag-preparer는 `GET_LOCK`으로 중복 실행을 막습니다. 이전 실행이 아직 돌고 있으면
 새 실행은 `exit_reason='LOCK_BUSY'`로 기록하고 바로 종료합니다.
@@ -305,7 +306,7 @@ WHERE id = …;
 
 - [ ] 각 서버에서 `git checkout claude/pipeline-state-tracking` (또는 PR 병합 후 main)
 - [ ] `pip install mysql-connector-python` (doc-parser, rag-preparer 서버)
-- [ ] 환경변수: `MYSQL_HOST` `MYSQL_PORT` `MYSQL_DATABASE`(또는 `MYSQL_DB`) `MYSQL_USER` `MYSQL_PASSWORD`(또는 `MYSQL_PASS`)
+- [ ] doc-parser: `cp .env.example .env` 후 `MYSQL_PASSWORD` 입력 (주소·DB·계정은 기본값이 공유 DB)
 - [ ] ⛔ MySQL 버전과 권한 확인
   ```sql
   SELECT VERSION();          -- 8.0 이상 권장 (테스트는 8.4에서 통과)
