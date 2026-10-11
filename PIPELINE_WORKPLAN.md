@@ -107,6 +107,7 @@ WHERE id=…;
 - [x] P3-10 기존 `processed.json` → DB 이관 스크립트(DONE 항목을 PARSE COMPLETED로)
 - [x] P3-13 (운영 피드백) 이관 시 `[not-found]` 대량 발생 대응: 경로 끝/uidl 해시 매칭, 원인별 요약 출력 + 보고서 파일,
   `app.py`가 기존 완성 결과(`export_*`)를 재제출 없이 채택(`quality='LEGACY'`)
+- [x] P3-14 파일 기준 백필(doc-parser `backfill_from_files.py`): `mail_archive` 탐색 → DB에 없는 메일 행을 원본 uidl로 생성, 완성된 export → PARSE `COMPLETED(LEGACY)`
 - [x] P3-11 테스트(가짜 파싱 API + MariaDB)
 - [x] P3-12 README(실행·스케줄러 등록·모니터링)
 
@@ -130,6 +131,7 @@ WHERE id=…;
 - [x] P5-9 `promote_candidate_terms.py` 행 단위 SAVEPOINT, 실패 행만 `promote_failed` 표시
 - [x] P5-10 `upload_term_index.py` 문서 단위 상태 저장
 - [x] P5-11 테스트
+- [x] P5-13 파일 기준 백필(rag-preparer `backfill_from_files.py`): 전처리 출력 → PREPROCESS·CANDIDATE `COMPLETED(LEGACY)`, 업로드는 예전 상태 파일 기준 COMPLETED/PENDING
 - [x] P5-12 (추가 발견) 공통 모듈: 같은 초에 heartbeat를 두 번 갱신하면 "소유권 상실"로 오판하던 문제 수정(FOUND_ROWS), doc-parser 사본 동기화
 
 ### Phase 6. 모니터링·운영
@@ -146,6 +148,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-11 | P3-14, P5-13 | doc-parser, rag-preparer | 파일 기준 백필 스크립트 2종(dry-run 기본, `--apply`), 테스트 doc-parser 32건·rag-preparer 16건 통과 |
 | 2026-10-11 | P3-13 | doc-parser | 이관 매칭 개선(경로 끝·uidl 해시), 요약 출력·보고서, 기존 export 채택 안전장치, 테스트 4건 추가(총 28건) |
 | 2026-10-11 | P0-3(일부) | rag-preparer | `.env` 자동 로딩(실행 파일 4개) + `.env.example`, 재시도 대기 설정을 호출 시점에 읽도록 수정, 테스트 추가 |
 | 2026-10-11 | P0-3(일부) | 전체 | DB 주소·DB·계정 기본값 통일, doc-parser `.env` 자동 로딩 + `.env.example` |
@@ -184,14 +187,16 @@ doc-parser와 rag-preparer는 `GET_LOCK`으로 중복 실행을 막습니다. �
 1. **email-ingestion** 새 버전 배포 (스키마 변경 없음)
 2. **doc-parser**
    1. 기존 상주 프로세스(예전 `app.py`) 중지
-   2. 환경변수 설정 후 `python migrate_processed_json.py --dry-run` → 건수 확인 → `python migrate_processed_json.py`
+   2. `python backfill_from_files.py`(dry-run) → 건수 확인 → `python backfill_from_files.py --apply`
+     (파일 기준 백필. `migrate_processed_json.py`는 대안이며 둘 다 실행해도 중복되지 않음)
    3. 스케줄러에 `python app.py` 등록 (테이블·뷰는 첫 실행 시 자동 생성)
 3. **rag-preparer**
    1. 기존 상주 프로세스(`upload_indices.py`, 용어 스크립트 `nohup`) 중지
    2. 스케줄러에 `python run_pipeline.py` 및 용어 잡 2개 등록
-   3. 첫 실행에서 예전 상태 파일(`_state_processed.json`)을 읽어 이미 만든 결과·업로드는 재사용하고,
+   3. 먼저 `python backfill_from_files.py`(dry-run) → `--apply` 로 기존 처리분을 DB에 채움
+  4. 첫 실행에서 예전 상태 파일(`_state_processed.json`)을 읽어 이미 만든 결과·업로드는 재사용하고,
       **예전에 실패해 빠진 문서만 다시 업로드**합니다.
-   4. ⚠️ P0-2(RAG `insert-doc` 멱등성) 확인 전에는 "예전 상태 파일에 없는 문서"가 다시 전송될 수 있습니다.
+   5. ⚠️ P0-2(RAG `insert-doc` 멱등성) 확인 전에는 "예전 상태 파일에 없는 문서"가 다시 전송될 수 있습니다.
 4. 부록 C의 A-5, A-6(누락 탐지) 쿼리가 0건인지 확인
 
 ## 부록 C. 모니터링 SQL
