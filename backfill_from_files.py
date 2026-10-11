@@ -182,6 +182,7 @@ def backfill(
         "upload_pending_created": 0,
         "upload_already_present": 0,
         "upload_skipped_disabled_index": 0,
+        "preprocess_read_error": 0,
     }
     details: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
@@ -216,7 +217,14 @@ def backfill(
                 continue
 
             export_dir = Path(row["output_ref"])
-            collected = _collect_outputs(export_dir) if export_dir.is_dir() else None
+            try:
+                collected = _collect_outputs(export_dir) if export_dir.is_dir() else None
+            except Exception as e:
+                # 파일 하나의 오류(깨진 jsonl 등)로 전체 백필이 중단되지 않도록 그 메일만 건너뜀
+                counters["preprocess_read_error"] += 1
+                details["preprocess_read_error"].append(
+                    {"mail_id": mail_id, "export_dir": str(export_dir), "error": repr(e)[:500]})
+                continue
             if collected is None:
                 counters["preprocess_output_missing"] += 1
                 details["preprocess_output_missing"].append(
@@ -280,7 +288,7 @@ def backfill(
 def _print_summary(counters, details, apply, report_path, verbose, has_legacy) -> None:
     print(f"업로드 대상 인덱스(RAG_UPLOAD_INDEXES): {rp.UPLOAD_INDEXES}")
     print(("" if apply else "[DRY-RUN] ") + json.dumps(counters, ensure_ascii=False))
-    for category in ("preprocess_output_missing", "upload_pending_created"):
+    for category in ("preprocess_read_error", "preprocess_output_missing", "upload_pending_created"):
         rows = details.get(category) or []
         if not rows:
             continue
@@ -295,6 +303,9 @@ def _print_summary(counters, details, apply, report_path, verbose, has_legacy) -
     if counters["upload_pending_created"]:
         print("\n※ upload_pending_created: 다음 run_pipeline.py 실행에서 업로드됩니다. "
               "insert-doc 이 같은 doc_id를 덮어쓰는지(P0-2) 확인 후 진행하세요.")
+    if counters["preprocess_read_error"]:
+        print("※ preprocess_read_error: 파일을 읽다 오류가 난 메일입니다(전체 목록은 보고서). "
+              "run_pipeline.py가 처리하며, 같은 오류면 해당 작업이 FAILED로 기록됩니다.")
     if counters["preprocess_output_missing"]:
         print("※ preprocess_output_missing: 전처리 출력이 없는 메일입니다. run_pipeline.py가 LLM으로 새로 처리합니다.")
     if not apply:

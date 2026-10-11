@@ -153,3 +153,17 @@ def test_existing_tasks_for_disabled_index_are_not_claimed(env, monkeypatch):
     assert env["calls"]["upload"] == ["rp-ifa-ver3-full::d1"]
     pending = sorted(r["item_key"] for r in _tasks(env["cfg"], "UPLOAD") if r["status"] == "PENDING")
     assert pending == ["rp-ifa-ver3-lite::d1", "rp-ifa-ver3-raw::d1"]
+
+
+def test_one_broken_output_file_does_not_stop_backfill(env):
+    _mail(env, 1, ["d1"])
+    _mail(env, 2, ["d2"])
+    _mail(env, 3, ["d3"])
+    broken = env["out_root"] / "inline_fa_report" / "ver3" / "m2" / "doc" / "r__full.jsonl"
+    broken.write_text("{not json\n", encoding="utf-8")
+
+    c = bf.backfill(env["cfg"], apply=True)
+    assert c["preprocess_read_error"] == 1
+    assert c["preprocess_completed_created"] == 2  # 1, 3은 정상 처리
+    done = sorted(t["mail_id"] for t in _tasks(env["cfg"], "PREPROCESS"))
+    assert done == [1, 3]
