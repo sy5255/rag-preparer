@@ -3,6 +3,9 @@
 > 이 문서는 4개 저장소(`email-ingestion`, `doc-parser`, `rag-preparer`, `request-pipeline`)에
 > **동일한 내용**으로 들어 있습니다. 진행 상황이 바뀌면 4개 저장소의 사본을 함께 갱신합니다.
 > 작업 브랜치: 모든 저장소 `claude/pipeline-state-tracking`
+> - email-ingestion은 **`agent/deferred-file-archive` 위에서** 작업합니다(2026-10-11 재구성).
+>   main 기준으로 작업했던 이전 기록은 `claude/pipeline-state-tracking-main-base`에 보관.
+> - request-pipeline은 **`claude/ae-llm-agent-mail-retry-h1vk3i` 위에서** 작업합니다(2026-10-11 재구성, 이전 기록은 같은 이름의 `-main-base` 브랜치).
 
 ## 1. 목표
 
@@ -115,7 +118,7 @@ WHERE id=…;
 - [x] P4-1 메일 폴더를 `.partial` 디렉터리에 완성한 뒤 rename(원자적 게시), 남은 `.partial` 정리
 - [x] P4-2 `exists_skip`은 최종 폴더에 `.enriched.eml`이 있을 때만 성공, 아니면 불완전 폴더로 보고 재생성
 - [x] P4-3 stale FILE_ARCHIVE 복구 시 `retry_count` 증가, 상한 도달 시 FAILED
-- [x] P4-4 `ingest_folder.py`에서 기존 ROUTED/RETRY 행 재처리
+- [x] P4-4 `ingest_folder.py`에서 기존 ROUTED/RETRY 행 재처리 (deferred 브랜치에 이미 구현되어 있어 그 구현 사용)
 - [x] P4-5 테스트
 - [x] P4-6 ~~`ingest_folder.py` 첫 줄 파일명 삭제~~ → **되돌림**: 첫 줄 파일명은 init 모드(최초 세팅 전용) 마커이므로 유지. 테스트는 그 줄을 건너뛰고 불러옴
 
@@ -144,19 +147,22 @@ WHERE id=…;
 - [x] P6-7 운영 환경 검증 가이드(이 문서 **부록 D**)
 
 ### Phase 7. email-ingestion 야간 FILE_ARCHIVE
-- [x] P7-1 `FILE_ARCHIVE_MODE=NIGHT`(기본): 평소 실행은 수집·분류·DB 기록만, FILE_ARCHIVE 메일은 `ROUTED`(저장 대기)
-- [x] P7-2 `python ingest_pop3.py --archive-only`: 수집 없이 저장 대기(ROUTED/RETRY) 메일만 파일로 저장 (시간 무관)
-- [x] P7-3 서버 시각 04:00~05:00 실행은 수집 후 자동 저장 (`FILE_ARCHIVE_AUTO_START_HOUR`/`_END_HOUR`)
-- [x] P7-4 저장 시점에 POP3에서 원본이 사라진 메일(발송 취소·재전송)은 저장하지 않고 `SOURCE_MISSING`으로 종료
-- [x] P7-5 `FILE_ARCHIVE_MODE=IMMEDIATE`로 예전 동작(수집 즉시 저장) 유지 가능
-- [x] P7-6 테스트(가짜 POP3 + MySQL), request-pipeline 연계 문서 갱신
+> 야간 저장 기능은 `agent/deferred-file-archive` 브랜치에 이미 구현되어 있어 그 구현을 기준으로 합니다.
+> (`REALTIME`/`NIGHT`/`DISABLED` 모드, `--archive-only`, `SOURCE_MISSING` + 유예 시간, POP3 전용 저장 대기열, GET_LOCK, 55분 처리 + 3분 대기 구조)
+- [x] P7-0 email-ingestion 작업 브랜치를 `agent/deferred-file-archive` 기준으로 재구성, main 기준으로 만든 중복 구현(야간 모드)은 폐기
+- [x] P7-1 P4 변경 이식: 메일 폴더 원자적 게시·불완전 폴더 재생성(`preprocess_core.py`), stale 복구 시 `retry_count` 증가(`mail_routing.py`)
+- [x] P7-2 NIGHT 모드 자동 저장 시간대: 서버 시각 04:00~05:00 처리 회차는 수집 후 저장 대기열까지 처리 (`FILE_ARCHIVE_AUTO_START_HOUR`/`_END_HOUR`)
+- [x] P7-3 테스트(가짜 POP3 + MySQL) 18건 통과, README·`.env.example` 갱신, request-pipeline 연계 문서를 실제 동작 기준으로 수정
+- [~] P7-4 `ingest_folder.py` 첫 줄 init 모드 마커: main에는 있으나 deferred 브랜치에는 없음 → **사용자 확인 필요**
+- [x] P7-5 request-pipeline 작업 브랜치를 `claude/ae-llm-agent-mail-retry-h1vk3i` 기준으로 재구성(DB 기본값·연계 문서·작업계획서 이식), 테스트 54건 통과
 
 ## 5. 진행 기록
 | 날짜 | 항목 | 저장소 | 비고 |
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
-| 2026-10-11 | P7-1~P7-6 | email-ingestion, request-pipeline | 야간 FILE_ARCHIVE 모드·`--archive-only`·04~05시 자동 저장·`SOURCE_MISSING`, 테스트 17건 통과 |
+| 2026-10-11 | P7-5 | request-pipeline | 브랜치를 `claude/ae-llm-agent-mail-retry-h1vk3i` 기준으로 재구성, 테스트 54건 통과 |
+| 2026-10-11 | P7-0~P7-3 | email-ingestion, request-pipeline | 브랜치를 `agent/deferred-file-archive` 기준으로 재구성, P4 변경 이식, 04~05시 자동 저장 추가, 테스트 18건 통과 |
 | 2026-10-11 | P3-14, P5-13 | doc-parser, rag-preparer | 파일 기준 백필 스크립트 2종(dry-run 기본, `--apply`), 테스트 doc-parser 32건·rag-preparer 16건 통과 |
 | 2026-10-11 | P3-13 | doc-parser | 이관 매칭 개선(경로 끝·uidl 해시), 요약 출력·보고서, 기존 export 채택 안전장치, 테스트 4건 추가(총 28건) |
 | 2026-10-11 | P0-3(일부) | rag-preparer | `.env` 자동 로딩(실행 파일 4개) + `.env.example`, 재시도 대기 설정을 호출 시점에 읽도록 수정, 테스트 추가 |
@@ -177,8 +183,8 @@ WHERE id=…;
 
 | 저장소 | 작업 디렉터리 | 실행 명령 | 비고 |
 |---|---|---|---|
-| email-ingestion | `/config/work/email-ingestion` | `python ingest_pop3.py` | 1시간마다. 04:00~05:00 실행에서 FILE_ARCHIVE 파일 자동 저장 |
-| email-ingestion (수동 저장) | `/config/work/email-ingestion` | `python ingest_pop3.py --archive-only` | 필요할 때 수동 실행(시간 무관) |
+| email-ingestion | `/config/work/email-ingestion` | `python ingest_pop3.py` | 1시간마다(55분 처리 + 3분 대기 후 종료). 04:00~05:00 회차에서 FILE_ARCHIVE 파일 자동 저장 |
+| email-ingestion (수동 저장) | `/config/work/email-ingestion` | `RUN_ONCE=true python ingest_pop3.py --archive-only` | 필요할 때 수동 1회 실행(시간 무관). `RUN_ONCE` 없이 실행하면 55분 동안 반복 |
 | request-pipeline | `/config/work/request-pipeline` | `python run_pipeline.py` | 55분 처리 + 3분 대기 후 종료 |
 | doc-parser | `/config/work/doc-parser` | `python app.py` | 시간 예산 50분 |
 | rag-preparer | `/config/work/rag-preparer` | `python run_pipeline.py` | 시간 예산 50분 |
@@ -339,22 +345,21 @@ WHERE id = …;
   PIPELINE_TEST_MYSQL_HOST=... PIPELINE_TEST_MYSQL_PORT=3306 PIPELINE_TEST_MYSQL_USER=... PIPELINE_TEST_MYSQL_PASSWORD=... \
     python -m pytest -q tests
   ```
-  기대 결과: doc-parser 23개 · rag-preparer 13개 · email-ingestion 6개 통과.
-  request-pipeline 기존 테스트 3개(`test_run_recovery.py`)는 main에서도 실패하는 기존 문제입니다.
+  기대 결과: doc-parser 32개 · rag-preparer 16개 · email-ingestion 18개 · request-pipeline 54개 통과.
 
 ### D-1. email-ingestion
 
 변경점: 메일 폴더 원자적 게시(`.partial` → rename), 불완전 폴더 재생성, 멈춘 작업 복구 시 `retry_count` 증가, 폴더 모드 RETRY 재처리.
 
-- [ ] **낮 실행(기록만)**: `python ingest_pop3.py` → 새 FILE_ARCHIVE 메일이 `status='ROUTED'`이고 파일은 생기지 않는지
-- [ ] **수동 저장**: `python ingest_pop3.py --archive-only`
+- [ ] **낮 실행(기록만)**: `RUN_ONCE=true python ingest_pop3.py` → 새 FILE_ARCHIVE 메일이 `status='ROUTED'`이고 파일은 생기지 않는지
+- [ ] **수동 저장**: `RUN_ONCE=true python ingest_pop3.py --archive-only`
   - 해당 메일이 `status='COMPLETED'`이고, 폴더 안에 `*.enriched.eml`, `*.txt`, `attachments/`가 있는지
   - ⛔ 남은 임시 폴더가 없어야 함: `find /config/work/sharedworkspace/mail_archive -name "*.partial"` → 결과 없음
   - 저장 경로 형식(`{키워드}/{verN}/{날짜}__{제목}__{suffix}`)이 예전과 같은지
 - [ ] **불완전 폴더 재생성** (테스트 메일 1건으로)
   1. COMPLETED 메일 1건의 폴더에서 `*.enriched.eml`을 다른 곳으로 옮김
   2. `UPDATE ae_llm_agent_mail SET status='RETRY' WHERE id=<id>;`
-  3. `python ingest_pop3.py --archive-only` → 폴더가 다시 만들어지고 `*.enriched.eml`이 생기며 COMPLETED
+  3. `RUN_ONCE=true python ingest_pop3.py --archive-only` → 폴더가 다시 만들어지고 `*.enriched.eml`이 생기며 COMPLETED
   4. `mail_archive/.../skipped.log`에 `reason=incomplete_rebuild` 기록
 - [ ] **멈춘 작업 복구**
   ```sql
@@ -362,10 +367,11 @@ WHERE id = …;
   SET status='PROCESSING', updated_at=NOW() - INTERVAL 1 HOUR
   WHERE id=<테스트 메일 id>;
   ```
-  → `python ingest_pop3.py` 실행 후 `status='RETRY'`, `retry_count`가 1 증가 (`MAX_RETRY_COUNT` 도달 시 `FAILED`)
-- [ ] **발송 취소 메일**: 테스트 메일을 보낸 뒤 낮에 `python ingest_pop3.py`(ROUTED 확인) → 발송 취소 → `--archive-only`
+  → `RUN_ONCE=true python ingest_pop3.py --archive-only` 실행 후 `status='RETRY'`, `retry_count`가 1 증가 (`MAX_RETRY_COUNT` 도달 시 `FAILED`)
+- [ ] **발송 취소 메일**: 테스트 메일을 보낸 뒤 낮에 `RUN_ONCE=true python ingest_pop3.py`(ROUTED 확인) → 발송 취소 →
+  유예 시간(`FILE_ARCHIVE_SOURCE_MISSING_GRACE_MINUTES`, 기본 10분) 후 `RUN_ONCE=true python ingest_pop3.py --archive-only`
   → 해당 메일 `status='SOURCE_MISSING'`, 파일 없음. 재전송한 메일은 새 행으로 저장
-- [ ] **04시 자동 저장**: 스케줄러 등록 후 다음 날 04시대 실행 로그에 `[ARCHIVE]` 줄이 있고, 저장 대기 메일이 COMPLETED가 되는지
+- [ ] **04시 자동 저장**: 스케줄러 등록 후 다음 날 04시대 실행 로그에 `[FILE_ARCHIVE_AUTO]`·`[FILE_QUEUE]` 줄이 있고, 저장 대기 메일이 COMPLETED가 되는지
 - [ ] **폴더 모드(init)**: 평소 방식으로 `ingest_folder.py` 실행 시 이미 DB에 있는 ROUTED/RETRY 행이 다시 저장되는지
 
 ### D-2. doc-parser
