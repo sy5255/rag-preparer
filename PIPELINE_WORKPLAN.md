@@ -105,6 +105,8 @@ WHERE id=…;
 - [x] P3-8 원격 태스크 FAILED/ERROR 시 `external_id` 초기화 후 RETRY
 - [x] P3-9 결과 경로(`output_ref`)·해시 기록, `.DONE` 마커 유지
 - [x] P3-10 기존 `processed.json` → DB 이관 스크립트(DONE 항목을 PARSE COMPLETED로)
+- [x] P3-13 (운영 피드백) 이관 시 `[not-found]` 대량 발생 대응: 경로 끝/uidl 해시 매칭, 원인별 요약 출력 + 보고서 파일,
+  `app.py`가 기존 완성 결과(`export_*`)를 재제출 없이 채택(`quality='LEGACY'`)
 - [x] P3-11 테스트(가짜 파싱 API + MariaDB)
 - [x] P3-12 README(실행·스케줄러 등록·모니터링)
 
@@ -144,6 +146,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-11 | P3-13 | doc-parser | 이관 매칭 개선(경로 끝·uidl 해시), 요약 출력·보고서, 기존 export 채택 안전장치, 테스트 4건 추가(총 28건) |
 | 2026-10-11 | P0-3(일부) | rag-preparer | `.env` 자동 로딩(실행 파일 4개) + `.env.example`, 재시도 대기 설정을 호출 시점에 읽도록 수정, 테스트 추가 |
 | 2026-10-11 | P0-3(일부) | 전체 | DB 주소·DB·계정 기본값 통일, doc-parser `.env` 자동 로딩 + `.env.example` |
 | 2026-10-06 | P6-6, P6-7 | 전체 | 뷰에 CONFLICT 포함, 운영 검증 가이드(부록 D) |
@@ -353,7 +356,9 @@ WHERE id = …;
 - [ ] 기존 상주 `app.py` 프로세스 중지
 - [ ] ⛔ **이관 dry-run**: `python migrate_processed_json.py --dry-run`
   - `done_items` ≈ `migrated`여야 정상
-  - `mail_row_not_found`가 많으면 `processed.json`의 경로와 DB `sharedworkspace_path` 형식이 다른 것입니다(심볼릭 링크, 마운트 경로 차이 등). **이 상태로 진행하면 이미 처리한 메일을 전부 다시 파싱합니다.** 멈추고 예시 경로 2~3개를 공유해 주세요.
+  - 출력 첫 줄의 건수 확인: `matched_exact` + `matched_tail` + `matched_suffix` = 매칭된 건, `mail_row_not_found` = DB에 메일 행이 없는 건
+  - `mail_row_not_found`는 app.py가 처리 대상으로 만들지 않으므로 **다시 파싱되지 않습니다.** 매칭된 건 중 이관이 빠져도 `app.py`가 결과 폴더의 기존 `export_*`를 채택하므로 재제출되지 않습니다.
+  - `ambiguous`가 있으면 보고서 파일(`migrate_processed_json_report.json`)의 해당 항목을 공유해 주세요.
 - [ ] `python migrate_processed_json.py` 실행
 - [ ] **첫 실행은 짧게**: `DOC_PARSER_TIME_BUDGET_SEC=600 python app.py`
   - ⛔ 로그 `seeded=`와 `remote_created`가 **이관되지 않은 신규 메일 수 정도**인지 확인. 예전에 처리한 메일까지 다시 제출하면 즉시 중지
