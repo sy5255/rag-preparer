@@ -3,7 +3,7 @@
 전체 계획: [PIPELINE_WORKPLAN.md](PIPELINE_WORKPLAN.md)
 
 ```bash
-export MYSQL_HOST=... MYSQL_PORT=3306 MYSQL_DB=fspas MYSQL_USER=... MYSQL_PASS=...
+export MYSQL_PASS=...   # 주소·DB·계정 기본값은 공유 DB(10.172.127.210:3306, fspas, dbuser)
 python run_pipeline.py
 ```
 

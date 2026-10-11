@@ -32,11 +32,12 @@ LLM_HEADERS_BASE = {
 # =========================
 # MYSQL SETTINGS
 # =========================
-MYSQL_HOST = os.getenv("MYSQL_HOST", "10.111.111.111") 
-MYSQL_PORT = int(os.getenv("MYSQL_PORT", "1111")) 
-MYSQL_DB = os.getenv("MYSQL_DB", "fspas")
+# 공유 DB(email-ingestion과 동일). MYSQL_DATABASE/MYSQL_PASSWORD 이름도 지원합니다.
+MYSQL_HOST = os.getenv("MYSQL_HOST", "10.172.127.210")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_DB = os.getenv("MYSQL_DB") or os.getenv("MYSQL_DATABASE") or "fspas"
 MYSQL_USER = os.getenv("MYSQL_USER", "dbuser")
-MYSQL_PASS = os.getenv("MYSQL_PASS", "12345") 
+MYSQL_PASS = os.getenv("MYSQL_PASS") or os.getenv("MYSQL_PASSWORD") or "12345"
 
 TERM_CACHE_TTL_SEC = int(os.getenv("TERM_CACHE_TTL_SEC", "300"))
 

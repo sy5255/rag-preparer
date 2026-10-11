@@ -83,6 +83,37 @@ def _env_first(*names: str, default: Optional[str] = None) -> Optional[str]:
     return default
 
 
+def load_env_file(path: Path, *, override: bool = False) -> int:
+    """
+    KEY=VALUE 형식의 .env 파일을 읽어 환경변수로 설정합니다. (외부 패키지 불필요)
+    - 빈 줄과 # 주석은 무시, 값 양끝의 따옴표는 제거
+    - 이미 설정된 환경변수는 override=True가 아니면 덮어쓰지 않음
+    - 파일이 없으면 아무것도 하지 않음
+    반환값: 새로 설정한 변수 개수
+    """
+    path = Path(path)
+    if not path.is_file():
+        return 0
+    count = 0
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if not key:
+            continue
+        if override or key not in os.environ:
+            os.environ[key] = value
+            count += 1
+    return count
+
+
 @dataclass(frozen=True)
 class DBConfig:
     host: str
@@ -93,15 +124,17 @@ class DBConfig:
 
     @classmethod
     def from_env(cls) -> "DBConfig":
+        # 접속 주소·DB·계정 기본값은 email-ingestion과 같은 공유 DB입니다.
         # email-ingestion(MYSQL_DATABASE/MYSQL_PASSWORD)과
         # rag-preparer(MYSQL_DB/MYSQL_PASS)의 환경변수 이름을 모두 지원합니다.
         password = _env_first("MYSQL_PASSWORD", "MYSQL_PASS")
         if not password:
             raise RuntimeError(
-                "MySQL password is not set. Set MYSQL_PASSWORD (or MYSQL_PASS)."
+                "MySQL password is not set. Set MYSQL_PASSWORD (or MYSQL_PASS) "
+                "in the environment or in the .env file next to the script."
             )
         return cls(
-            host=_env_first("MYSQL_HOST", default="127.0.0.1"),
+            host=_env_first("MYSQL_HOST", default="10.172.127.210"),
             port=int(_env_first("MYSQL_PORT", default="3306")),
             database=_env_first("MYSQL_DATABASE", "MYSQL_DB", default="fspas"),
             user=_env_first("MYSQL_USER", default="dbuser"),

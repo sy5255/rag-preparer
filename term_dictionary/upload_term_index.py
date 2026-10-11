@@ -13,11 +13,12 @@ import requests
 # =========================
 # MYSQL SETTINGS
 # =========================
+# 공유 DB(email-ingestion과 동일). MYSQL_DATABASE/MYSQL_PASSWORD 이름도 지원합니다.
 MYSQL_HOST = os.getenv("MYSQL_HOST", "10.172.127.210")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_DB = os.getenv("MYSQL_DB", "fspas")
+MYSQL_DB = os.getenv("MYSQL_DB") or os.getenv("MYSQL_DATABASE") or "fspas"
 MYSQL_USER = os.getenv("MYSQL_USER", "dbuser")
-MYSQL_PASS = os.getenv("MYSQL_PASS", "separt123!")
+MYSQL_PASS = os.getenv("MYSQL_PASS") or os.getenv("MYSQL_PASSWORD") or "separt123!"
 
 # =========================
 # OUTPUT / STATE
