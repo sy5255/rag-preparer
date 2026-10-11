@@ -7,7 +7,13 @@ import time
 import json
 import hashlib
 import requests
+from pathlib import Path
 from typing import Dict, Any
+
+import pipeline_state
+
+# 같은 폴더의 .env를 먼저 읽습니다(아래 모듈들이 import 시점에 설정을 읽음).
+pipeline_state.load_env_file(Path(__file__).resolve().parent / ".env")
 
 from normalize_docs import WATCH_ROOT, OUT_ROOT, get_category_from_path, get_version_from_path
 from build_serving_views import preprocess_jsonl_file

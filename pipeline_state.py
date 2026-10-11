@@ -522,9 +522,14 @@ class Task:
 
 
 def backoff_seconds(attempt: int) -> int:
-    """attempt(실패 횟수, 1부터)에 대한 재시도 대기 시간."""
+    """
+    attempt(실패 횟수, 1부터)에 대한 재시도 대기 시간.
+    .env가 이 모듈 import 이후에 로딩되어도 반영되도록 호출 시점에 환경변수를 읽습니다.
+    """
+    base = int(os.getenv("PIPELINE_BACKOFF_BASE_SEC", str(BACKOFF_BASE_SEC)))
+    cap = int(os.getenv("PIPELINE_BACKOFF_MAX_SEC", str(BACKOFF_MAX_SEC)))
     exponent = max(0, int(attempt) - 1)
-    return int(min(BACKOFF_BASE_SEC * (2 ** min(exponent, 20)), BACKOFF_MAX_SEC))
+    return int(min(base * (2 ** min(exponent, 20)), cap))
 
 
 def _json_dict(value: Any) -> Dict[str, Any]:

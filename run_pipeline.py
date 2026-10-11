@@ -11,6 +11,7 @@ doc-parser의 PARSE 결과를 받아 세 단계를 처리합니다.
 모든 단계의 상태는 ae_llm_agent_pipeline_task / _attempt / _run 에 기록됩니다.
 
 실행: python run_pipeline.py
+설정: 같은 폴더의 .env (예시는 .env.example)
 """
 
 import hashlib
@@ -22,11 +23,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-import normalize_docs
 import pipeline_state as ps
-import upload_indices
-from build_serving_views import LLMEnrichmentError, build_doc_views
-from candidate_queue import collect_candidates_from_additional
+
+# 같은 폴더의 .env를 먼저 읽습니다(이미 설정된 환경변수가 우선).
+# 아래 모듈들이 import 시점에 DB/LLM 설정을 읽으므로 반드시 그보다 앞에 있어야 합니다.
+ps.load_env_file(Path(__file__).resolve().parent / ".env")
+
+import normalize_docs  # noqa: E402
+import upload_indices  # noqa: E402
+from build_serving_views import LLMEnrichmentError, build_doc_views  # noqa: E402
+from candidate_queue import collect_candidates_from_additional  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

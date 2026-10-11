@@ -7,8 +7,19 @@ import time
 import hashlib
 from typing import Dict, Any, List, Set
 
+import sys
+from pathlib import Path
+
 import mysql.connector
 import requests
+
+# rag-preparer 폴더의 .env를 먼저 읽습니다(이미 설정된 환경변수가 우선).
+_RAG_ROOT = Path(__file__).resolve().parent.parent
+if str(_RAG_ROOT) not in sys.path:
+    sys.path.insert(0, str(_RAG_ROOT))
+import pipeline_state  # noqa: E402
+
+pipeline_state.load_env_file(_RAG_ROOT / ".env")
 
 # =========================
 # MYSQL SETTINGS

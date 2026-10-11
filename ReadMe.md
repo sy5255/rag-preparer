@@ -3,9 +3,13 @@
 전체 계획: [PIPELINE_WORKPLAN.md](PIPELINE_WORKPLAN.md)
 
 ```bash
-export MYSQL_PASS=...   # 주소·DB·계정 기본값은 공유 DB(10.172.127.210:3306, fspas, dbuser)
+cp .env.example .env      # 최초 1회. .env 의 MYSQL_PASSWORD 를 채우세요
 python run_pipeline.py
 ```
+
+실행 파일(`run_pipeline.py`, `upload_indices.py`, `term_dictionary/` 잡 2개)은 rag-preparer 폴더의 `.env`를
+자동으로 읽습니다(이미 설정된 환경변수가 우선). `.env`는 `.gitignore`에 들어 있어 git에 올라가지 않습니다.
+DB 주소·DB·계정 기본값은 공유 DB(`10.172.127.210:3306`, `fspas`, `dbuser`)이고, 비밀번호만 `.env`에 넣으면 됩니다.
 
 사내 스케줄러: 실행 주기 1시간, 최대 실행 시간 59분, 명령 `python run_pipeline.py`.
 기본 시간 예산은 50분(`RAG_PREPARER_TIME_BUDGET_SEC`)이며 1회 실행 후 종료합니다.
