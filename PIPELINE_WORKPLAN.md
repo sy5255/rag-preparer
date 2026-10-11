@@ -111,6 +111,7 @@ WHERE id=…;
 - [x] P3-13 (운영 피드백) 이관 시 `[not-found]` 대량 발생 대응: 경로 끝/uidl 해시 매칭, 원인별 요약 출력 + 보고서 파일,
   `app.py`가 기존 완성 결과(`export_*`)를 재제출 없이 채택(`quality='LEGACY'`)
 - [x] P3-14 파일 기준 백필(doc-parser `backfill_from_files.py`): `mail_archive` 탐색 → DB에 없는 메일 행을 원본 uidl로 생성, 완성된 export → PARSE `COMPLETED(LEGACY)`
+- [x] P3-15 (운영 피드백) 백필 복구: PARSE COMPLETED인데 결과 폴더가 삭제된 경우 남아 있는 완성 export로 재연결, 없으면 PENDING으로 되돌림
 - [x] P3-11 테스트(가짜 파싱 API + MariaDB)
 - [x] P3-12 README(실행·스케줄러 등록·모니터링)
 
@@ -162,6 +163,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-11 | P3-15 | doc-parser | 삭제된 결과 폴더를 가리키는 PARSE 작업 복구(`parse_repointed`/`parse_reset_missing_output`), 테스트 34건 통과 |
 | 2026-10-11 | P5-14 | rag-preparer, doc-parser | `RAG_UPLOAD_INDEXES`, `--uploads-only`, `claim_next` item_key 필터, 테스트 rag-preparer 19건·doc-parser 33건 통과 |
 | 2026-10-11 | P7-5 | request-pipeline | 브랜치를 `claude/ae-llm-agent-mail-retry-h1vk3i` 기준으로 재구성, 테스트 54건 통과 |
 | 2026-10-11 | P7-0~P7-3 | email-ingestion, request-pipeline | 브랜치를 `agent/deferred-file-archive` 기준으로 재구성, P4 변경 이식, 04~05시 자동 저장 추가, 테스트 18건 통과 |
@@ -347,7 +349,7 @@ WHERE id = …;
   PIPELINE_TEST_MYSQL_HOST=... PIPELINE_TEST_MYSQL_PORT=3306 PIPELINE_TEST_MYSQL_USER=... PIPELINE_TEST_MYSQL_PASSWORD=... \
     python -m pytest -q tests
   ```
-  기대 결과: doc-parser 33개 · rag-preparer 19개 · email-ingestion 18개 · request-pipeline 54개 통과.
+  기대 결과: doc-parser 34개 · rag-preparer 19개 · email-ingestion 18개 · request-pipeline 54개 통과.
 
 ### D-1. email-ingestion
 
