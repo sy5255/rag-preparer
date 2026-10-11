@@ -15,6 +15,20 @@ DB 주소·DB·계정 기본값은 공유 DB(`10.172.127.210:3306`, `fspas`, `db
 기본 시간 예산은 50분(`RAG_PREPARER_TIME_BUDGET_SEC`)이며 1회 실행 후 종료합니다.
 `upload_indices.py`(상주 루프)는 예전 방식이며, `run_pipeline.py`로 전환한 뒤에는 함께 실행하지 않습니다.
 
+## 기존 처리분 백필 (최초 1회)
+
+예전에 처리한 파일을 기준으로 DB 작업 상태를 채웁니다. **doc-parser의 `backfill_from_files.py --apply`를 먼저 실행**한 뒤:
+
+```bash
+python backfill_from_files.py            # dry-run: 건수·예시만 확인
+python backfill_from_files.py --apply    # 실제 반영
+```
+
+- 전처리 출력(`__raw/__full/__lite.jsonl`)이 모두 있는 메일 → PREPROCESS·CANDIDATE `COMPLETED(LEGACY)` (LLM 재호출 없음)
+- 업로드: 예전 상태 파일에 성공 기록이 있으면 `COMPLETED(LEGACY)`, 없으면 `PENDING`(다음 실행에서 업로드).
+  이미 인덱스에 다 올라가 있다고 확신하면 `--mark-all-uploaded`
+- 출력이 없는 메일은 건드리지 않음 → `run_pipeline.py`가 새로 처리
+
 ## 단계
 
 | stage | 단위 | 하는 일 |
