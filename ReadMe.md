@@ -29,6 +29,23 @@ python backfill_from_files.py --apply    # 실제 반영
   이미 인덱스에 다 올라가 있다고 확신하면 `--mark-all-uploaded`
 - 출력이 없는 메일은 건드리지 않음 → `run_pipeline.py`가 새로 처리
 
+## 업로드 대상 인덱스 (`RAG_UPLOAD_INDEXES`)
+
+`.env`의 `RAG_UPLOAD_INDEXES`(쉼표 구분, `*` 패턴 가능, 기본 `*-full`)에 있는 인덱스만 UPLOAD 작업을 만들고,
+업로드하고, 집계합니다. raw/lite처럼 목록에 없는 인덱스는 작업이 생기지 않으며 `upload_skipped_disabled_index`로만 셉니다.
+
+```env
+RAG_UPLOAD_INDEXES=rp-ifa-ver3-full
+```
+
+나중에 인덱스를 추가할 때:
+
+```bash
+# .env: RAG_UPLOAD_INDEXES=rp-ifa-ver3-full,rp-ifa-ver3-lite
+python backfill_from_files.py --uploads-only            # 추가될 건수 확인
+python backfill_from_files.py --uploads-only --apply    # 기존 메일분 lite 업로드 작업 추가
+```
+
 ## 단계
 
 | stage | 단위 | 하는 일 |

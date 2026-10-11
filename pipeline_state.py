@@ -709,12 +709,27 @@ class TaskQueue:
             conn.close()
 
     # ---- 가져가기 ----
-    def claim_next(self, stage: str, batch: int = 20) -> Optional[Task]:
+    def claim_next(
+        self,
+        stage: str,
+        batch: int = 20,
+        *,
+        item_key_like: Optional[Sequence[str]] = None,
+    ) -> Optional[Task]:
         """
         처리 가능한 작업 1건을 PROCESSING으로 가져옵니다. 없으면 None.
         RETRY보다 PENDING을, 같은 상태에서는 id 순서를 우선합니다.
+        item_key_like 를 주면 item_key 가 그 SQL LIKE 패턴 중 하나와 맞는 작업만 가져옵니다.
+        (빈 목록이면 아무것도 가져오지 않음)
         """
+        if item_key_like is not None and not item_key_like:
+            return None
         self.run.ensure_lock()
+        key_sql = ""
+        key_params: List[str] = []
+        if item_key_like:
+            key_sql = "AND (" + " OR ".join(["item_key LIKE %s"] * len(item_key_like)) + ")"
+            key_params = list(item_key_like)
         conn = connect(self.cfg)
         cur = conn.cursor(dictionary=True)
         try:
@@ -724,10 +739,11 @@ class TaskQueue:
                 WHERE stage=%s
                   AND status IN ('PENDING','RETRY')
                   AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+                  {key_sql}
                 ORDER BY (status='RETRY'), id
                 LIMIT %s
                 """,
-                (stage, int(batch)),
+                (stage, *key_params, int(batch)),
             )
             candidate_ids = [int(r["id"]) for r in cur.fetchall()]
             conn.commit()
@@ -979,6 +995,21 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
 
 def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     atomic_write_bytes(path, text.encode(encoding))
+
+
+def glob_to_like(pattern: str) -> str:
+    """'*', '?' 글롭 패턴을 SQL LIKE 패턴으로 바꿉니다. (%, _, \\ 는 이스케이프)"""
+    out = []
+    for ch in pattern:
+        if ch in ("\\", "%", "_"):
+            out.append("\\" + ch)
+        elif ch == "*":
+            out.append("%")
+        elif ch == "?":
+            out.append("_")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def partial_dir_for(final_dir: Path) -> Path:

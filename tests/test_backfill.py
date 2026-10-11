@@ -21,6 +21,7 @@ def env(tmp_path, monkeypatch, db_cfg):
     monkeypatch.setattr(normalize_docs, "WATCH_ROOT", str(parse_root))
     monkeypatch.setattr(normalize_docs, "OUT_ROOT", str(out_root))
     monkeypatch.setattr(run_pipeline, "LEGACY_STATE_FILE", str(out_root / "_state_processed.json"))
+    monkeypatch.setattr(run_pipeline, "UPLOAD_INDEXES", ["*"])  # 3개 인덱스 모두 대상
 
     calls = {"llm": 0, "upload": [], "candidates": 0}
 
@@ -111,3 +112,44 @@ def test_mark_all_uploaded(env):
     assert c["upload_completed_created"] == 3 and c["upload_pending_created"] == 0
     run_pipeline.run_once(env["cfg"])
     assert env["calls"]["upload"] == [] and env["calls"]["llm"] == 0
+
+
+def test_only_configured_indexes_are_counted_and_uploaded(env, monkeypatch):
+    monkeypatch.setattr(run_pipeline, "UPLOAD_INDEXES", ["rp-ifa-ver3-full"])
+    _mail(env, 1, ["d1", "d2"])
+    env["out_root"].mkdir(parents=True, exist_ok=True)
+    (env["out_root"] / "_state_processed.json").write_text(json.dumps({
+        "uploaded_docs": {"rp-ifa-ver3-full::d1": True, "rp-ifa-ver3-lite::d1": True},
+    }), encoding="utf-8")
+
+    c = bf.backfill(env["cfg"], apply=True)
+    assert c["upload_completed_created"] == 1   # full::d1
+    assert c["upload_pending_created"] == 1     # full::d2
+    assert c["upload_skipped_disabled_index"] == 4  # raw·lite × 2 문서
+    keys = sorted(r["item_key"] for r in _tasks(env["cfg"], "UPLOAD"))
+    assert keys == ["rp-ifa-ver3-full::d1", "rp-ifa-ver3-full::d2"]
+
+    run_pipeline.run_once(env["cfg"])
+    assert env["calls"]["upload"] == ["rp-ifa-ver3-full::d2"]
+
+    # 나중에 lite 추가 → --uploads-only 로 lite 작업만 추가 (lite::d1은 예전 기록이 있어 완료)
+    monkeypatch.setattr(run_pipeline, "UPLOAD_INDEXES", ["rp-ifa-ver3-full", "rp-ifa-ver3-lite"])
+    c = bf.backfill(env["cfg"], apply=True, uploads_only=True)
+    assert c["upload_completed_created"] == 1   # lite::d1
+    assert c["upload_pending_created"] == 1     # lite::d2
+    assert c["upload_already_present"] == 2    # full 두 건은 이미 있음
+    assert c["preprocess_completed_created"] == 0
+
+    env["calls"]["upload"].clear()
+    run_pipeline.run_once(env["cfg"])
+    assert env["calls"]["upload"] == ["rp-ifa-ver3-lite::d2"]
+
+
+def test_existing_tasks_for_disabled_index_are_not_claimed(env, monkeypatch):
+    _mail(env, 1, ["d1"])
+    bf.backfill(env["cfg"], apply=True)  # 3개 인덱스 모두 PENDING
+    monkeypatch.setattr(run_pipeline, "UPLOAD_INDEXES", ["rp-ifa-*-full"])
+    run_pipeline.run_once(env["cfg"])
+    assert env["calls"]["upload"] == ["rp-ifa-ver3-full::d1"]
+    pending = sorted(r["item_key"] for r in _tasks(env["cfg"], "UPLOAD") if r["status"] == "PENDING")
+    assert pending == ["rp-ifa-ver3-lite::d1", "rp-ifa-ver3-raw::d1"]

@@ -23,6 +23,7 @@ def env(tmp_path, monkeypatch, db_cfg):
     monkeypatch.setattr(normalize_docs, "WATCH_ROOT", str(parse_root))
     monkeypatch.setattr(normalize_docs, "OUT_ROOT", str(out_root))
     monkeypatch.setattr(run_pipeline, "LEGACY_STATE_FILE", str(out_root / "_state_processed.json"))
+    monkeypatch.setattr(run_pipeline, "UPLOAD_INDEXES", ["*"])  # 3개 인덱스 모두 대상
 
     llm = {"fail": 0, "calls": 0}
 
@@ -205,3 +206,13 @@ def test_legacy_state_reuses_outputs_and_skips_uploaded_docs(env):
     rows = {t["item_key"]: t["quality"] for t in _tasks(env["cfg"], "UPLOAD")}
     assert rows["rp-ifa-ver3-raw::d1"] == "LEGACY"
     assert rows["rp-ifa-ver3-raw::d2"] == "NORMAL"
+
+
+def test_preprocess_creates_uploads_only_for_configured_indexes(env, monkeypatch):
+    monkeypatch.setattr(run_pipeline, "UPLOAD_INDEXES", ["rp-ifa-ver3-full"])
+    _parse_done(env, docs=("d1", "d2"))
+    counters = run_pipeline.run_once(env["cfg"])
+    keys = sorted(t["item_key"] for t in _tasks(env["cfg"], "UPLOAD"))
+    assert keys == ["rp-ifa-ver3-full::d1", "rp-ifa-ver3-full::d2"]
+    assert counters["upload_skipped_disabled_index"] == 4
+    assert sorted(env["uploads"]["calls"]) == keys

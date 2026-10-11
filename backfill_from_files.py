@@ -9,17 +9,22 @@ PARSE 가 COMPLETED 인 메일마다
 1. export 폴더의 jsonl → preprocessed_jsonl 의 __raw/__full/__lite.jsonl 이 모두 있으면
    PREPROCESS 를 COMPLETED(quality='LEGACY')로 등록 (LLM 재호출 없음)
 2. CANDIDATE 를 COMPLETED(LEGACY)로 등록 (예전 경로에서 이미 후보 적재가 끝났으므로 중복 집계 방지)
-3. 문서 × 인덱스(raw/full/lite)마다 UPLOAD 작업 등록
+3. 문서 × 업로드 대상 인덱스(RAG_UPLOAD_INDEXES, 기본 '*-full')마다 UPLOAD 작업 등록
    - 예전 상태 파일(_state_processed.json)에 업로드 성공 기록이 있으면 COMPLETED(LEGACY)
    - 없으면 PENDING → 다음 run_pipeline.py 실행에서 업로드 (예전에 실패해 빠진 문서 복구)
    - --mark-all-uploaded 를 주면 기록이 없어도 모두 COMPLETED(LEGACY)로 처리
 
 출력 파일이 없는 메일은 건드리지 않습니다(run_pipeline.py 가 LLM으로 새로 처리).
 이미 COMPLETED/FAILED 인 작업은 바꾸지 않습니다.
+RAG_UPLOAD_INDEXES 에 없는 인덱스는 UPLOAD 작업을 만들지 않고 upload_skipped_disabled_index 로만 셉니다.
+
+업로드 대상 인덱스를 나중에 추가했다면 (예: RAG_UPLOAD_INDEXES=rp-ifa-ver3-full,rp-ifa-ver3-lite)
+--uploads-only 로 실행해 이미 전처리가 끝난 메일들에 새 인덱스용 UPLOAD 작업만 추가합니다.
 
 사용:
     python backfill_from_files.py                  # dry-run (DB에 쓰지 않고 건수만)
     python backfill_from_files.py --apply          # 실제 반영
+    python backfill_from_files.py --uploads-only [--apply]   # 업로드 대상 인덱스 추가 후
     옵션: --mark-all-uploaded, --report <파일> (기본 backfill_from_files_report.json), --verbose
 """
 
@@ -81,6 +86,27 @@ def _insert_pending(cur, mail_id: int, stage: str, item_key: str, *, input_ref: 
     return cur.rowcount
 
 
+def _add_upload_tasks(cur, mail_id, uploads, uploaded_docs, mark_all_uploaded,
+                      counters, details) -> None:
+    for up in uploads:
+        if mark_all_uploaded or uploaded_docs.get(up["item_key"]) is True:
+            rc = _upsert_completed(
+                cur, mail_id, rp.STAGE_UPLOAD, up["item_key"],
+                input_ref=up["input_ref"], input_hash=up["input_hash"],
+                output_hash=up["input_hash"],
+            )
+            counters["upload_completed_created" if rc else "upload_already_present"] += 1
+        else:
+            rc = _insert_pending(cur, mail_id, rp.STAGE_UPLOAD, up["item_key"],
+                                 input_ref=up["input_ref"], input_hash=up["input_hash"])
+            if rc:
+                counters["upload_pending_created"] += 1
+                details["upload_pending_created"].append(
+                    {"mail_id": mail_id, "item_key": up["item_key"]})
+            else:
+                counters["upload_already_present"] += 1
+
+
 def _collect_outputs(export_dir: Path) -> Optional[Dict[str, Any]]:
     """
     run_pipeline.process_preprocess 와 같은 규칙으로 출력 파일·업로드 대상을 모읍니다.
@@ -91,6 +117,7 @@ def _collect_outputs(export_dir: Path) -> Optional[Dict[str, Any]]:
         return None
 
     outputs, uploads, full_paths, categories = [], [], [], set()
+    skipped_disabled = 0
     hasher = hashlib.sha256()
     for jsonl_path in jsonl_files:
         category = normalize_docs.get_category_from_path(jsonl_path)
@@ -103,9 +130,13 @@ def _collect_outputs(export_dir: Path) -> Optional[Dict[str, Any]]:
         indexes = rp.index_names(category, version_tag)
         for mode in rp.MODES:
             hasher.update(ps.sha256_file(Path(out_by_mode[mode])).encode("ascii"))
+            enabled = rp.upload_index_enabled(indexes[mode])
             for doc in rp.read_jsonl(out_by_mode[mode]):
                 doc_id = doc.get("doc_id")
                 if not doc_id:
+                    continue
+                if not enabled:
+                    skipped_disabled += 1
                     continue
                 uploads.append({
                     "item_key": f"{indexes[mode]}::{doc_id}",
@@ -125,6 +156,7 @@ def _collect_outputs(export_dir: Path) -> Optional[Dict[str, Any]]:
         "full_paths": full_paths,
         "category": sorted(categories)[0] if categories else "",
         "output_hash": hasher.hexdigest(),
+        "skipped_disabled": skipped_disabled,
     }
 
 
@@ -133,6 +165,7 @@ def backfill(
     *,
     apply: bool,
     mark_all_uploaded: bool = False,
+    uploads_only: bool = False,
     report_path: Optional[Path] = None,
     verbose: bool = False,
 ) -> Dict[str, int]:
@@ -148,6 +181,7 @@ def backfill(
         "upload_completed_created": 0,
         "upload_pending_created": 0,
         "upload_already_present": 0,
+        "upload_skipped_disabled_index": 0,
     }
     details: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
@@ -172,7 +206,12 @@ def backfill(
         for n, row in enumerate(parse_rows, 1):
             counters["parse_completed_mails"] += 1
             mail_id = int(row["mail_id"])
-            if row.get("preprocess_status") not in (None, "PENDING", "RETRY"):
+            preprocess_done = row.get("preprocess_status") not in (None, "PENDING", "RETRY")
+            if uploads_only:
+                # 전처리가 끝난 메일에 업로드 대상 인덱스용 작업만 추가
+                if row.get("preprocess_status") != "COMPLETED":
+                    continue
+            elif preprocess_done:
                 counters["preprocess_already_present"] += 1
                 continue
 
@@ -182,6 +221,14 @@ def backfill(
                 counters["preprocess_output_missing"] += 1
                 details["preprocess_output_missing"].append(
                     {"mail_id": mail_id, "export_dir": str(export_dir)})
+                continue
+            counters["upload_skipped_disabled_index"] += collected["skipped_disabled"]
+
+            if uploads_only:
+                _add_upload_tasks(cur, mail_id, collected["uploads"], uploaded_docs,
+                                  mark_all_uploaded, counters, details)
+                if apply and n % COMMIT_EVERY == 0:
+                    conn.commit()
                 continue
 
             _upsert_completed(
@@ -203,23 +250,8 @@ def backfill(
             ):
                 counters["candidate_completed_created"] += 1
 
-            for up in collected["uploads"]:
-                if mark_all_uploaded or uploaded_docs.get(up["item_key"]) is True:
-                    rc = _upsert_completed(
-                        cur, mail_id, rp.STAGE_UPLOAD, up["item_key"],
-                        input_ref=up["input_ref"], input_hash=up["input_hash"],
-                        output_hash=up["input_hash"],
-                    )
-                    counters["upload_completed_created" if rc else "upload_already_present"] += 1
-                else:
-                    rc = _insert_pending(cur, mail_id, rp.STAGE_UPLOAD, up["item_key"],
-                                         input_ref=up["input_ref"], input_hash=up["input_hash"])
-                    if rc:
-                        counters["upload_pending_created"] += 1
-                        details["upload_pending_created"].append(
-                            {"mail_id": mail_id, "item_key": up["item_key"]})
-                    else:
-                        counters["upload_already_present"] += 1
+            _add_upload_tasks(cur, mail_id, collected["uploads"], uploaded_docs,
+                              mark_all_uploaded, counters, details)
 
             if apply and n % COMMIT_EVERY == 0:
                 conn.commit()
@@ -246,6 +278,7 @@ def backfill(
 
 
 def _print_summary(counters, details, apply, report_path, verbose, has_legacy) -> None:
+    print(f"업로드 대상 인덱스(RAG_UPLOAD_INDEXES): {rp.UPLOAD_INDEXES}")
     print(("" if apply else "[DRY-RUN] ") + json.dumps(counters, ensure_ascii=False))
     for category in ("preprocess_output_missing", "upload_pending_created"):
         rows = details.get(category) or []
@@ -277,6 +310,8 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true", help="DB에 실제 반영 (없으면 dry-run)")
     parser.add_argument("--mark-all-uploaded", action="store_true",
                         help="예전 상태 파일에 기록이 없어도 모든 업로드를 완료로 처리")
+    parser.add_argument("--uploads-only", action="store_true",
+                        help="전처리가 끝난 메일에 업로드 대상 인덱스용 UPLOAD 작업만 추가")
     parser.add_argument("--report", default=str(DEFAULT_REPORT_PATH))
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
@@ -285,6 +320,7 @@ def main() -> None:
         ps.DBConfig.from_env(),
         apply=args.apply,
         mark_all_uploaded=args.mark_all_uploaded,
+        uploads_only=args.uploads_only,
         report_path=Path(args.report) if args.report else None,
         verbose=args.verbose,
     )

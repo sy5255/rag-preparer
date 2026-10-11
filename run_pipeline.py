@@ -14,6 +14,7 @@ doc-parser의 PARSE 결과를 받아 세 단계를 처리합니다.
 설정: 같은 폴더의 .env (예시는 .env.example)
 """
 
+import fnmatch
 import hashlib
 import json
 import logging
@@ -71,6 +72,25 @@ USE_LEGACY_STATE = os.getenv("RAG_USE_LEGACY_STATE", "true").strip().lower() in 
 }
 
 MODES = ("raw", "full", "lite")
+
+# 업로드 대상 인덱스(쉼표 구분, '*' 패턴 가능). 여기에 없는 인덱스는 UPLOAD 작업을 만들지도, 업로드하지도 않습니다.
+# 예) RAG_UPLOAD_INDEXES=rp-ifa-ver3-full
+#     RAG_UPLOAD_INDEXES=rp-ifa-ver3-full,rp-ifa-ver3-lite
+# 기본값 '*-full' : 모든 카테고리·버전의 full 인덱스만
+UPLOAD_INDEXES = [
+    p.strip()
+    for p in os.getenv("RAG_UPLOAD_INDEXES", "*-full").split(",")
+    if p.strip()
+]
+
+
+def upload_index_enabled(index_name: str) -> bool:
+    return any(fnmatch.fnmatchcase(index_name, pattern) for pattern in UPLOAD_INDEXES)
+
+
+def upload_item_key_like() -> List[str]:
+    """UPLOAD 작업 item_key('<index>::<doc_id>')용 SQL LIKE 패턴."""
+    return [ps.glob_to_like(pattern) + "::%" for pattern in UPLOAD_INDEXES]
 
 
 # =========================
@@ -199,6 +219,9 @@ def process_preprocess(
         indexes = index_names(category, version_tag)
         for mode in MODES:
             hasher.update(ps.sha256_file(Path(out_by_mode[mode])).encode("ascii"))
+            if not upload_index_enabled(indexes[mode]):
+                run.incr("upload_skipped_disabled_index", len(views[mode]))
+                continue
             for doc in views[mode]:
                 doc_id = doc.get("doc_id")
                 if not doc_id:
@@ -378,8 +401,9 @@ def run_once(cfg: Optional[ps.DBConfig] = None) -> Dict[str, int]:
         run.incr("recovered", recovered)
         seeded = seed_preprocess(queue)
         run.incr("seeded", seeded)
-        logger.info("rag-preparer started run_id=%s recovered=%s seeded=%s legacy_state=%s",
-                    run.run_id, recovered, seeded, bool(legacy))
+        logger.info("rag-preparer started run_id=%s recovered=%s seeded=%s legacy_state=%s "
+                    "upload_indexes=%s",
+                    run.run_id, recovered, seeded, bool(legacy), UPLOAD_INDEXES)
 
         stop = False
         preprocess_deferred = False
@@ -395,7 +419,10 @@ def run_once(cfg: Optional[ps.DBConfig] = None) -> Dict[str, int]:
                             stop = True
                             run.exit_reason = "TIME_BUDGET"
                         break
-                    task = queue.claim_next(stage)
+                    task = queue.claim_next(
+                        stage,
+                        item_key_like=upload_item_key_like() if stage == STAGE_UPLOAD else None,
+                    )
                     if task is None:
                         break
                     progressed = True
