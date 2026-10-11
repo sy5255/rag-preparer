@@ -135,6 +135,7 @@ WHERE id=…;
 - [x] P5-10 `upload_term_index.py` 문서 단위 상태 저장
 - [x] P5-11 테스트
 - [x] P5-13 파일 기준 백필(rag-preparer `backfill_from_files.py`): 전처리 출력 → PREPROCESS·CANDIDATE `COMPLETED(LEGACY)`, 업로드는 예전 상태 파일 기준 COMPLETED/PENDING
+- [x] P5-14 업로드 대상 인덱스 설정 `RAG_UPLOAD_INDEXES`(기본 `*-full`): 목록에 있는 인덱스만 UPLOAD 작업 생성·업로드·집계, 인덱스 추가 시 `backfill_from_files.py --uploads-only`
 - [x] P5-12 (추가 발견) 공통 모듈: 같은 초에 heartbeat를 두 번 갱신하면 "소유권 상실"로 오판하던 문제 수정(FOUND_ROWS), doc-parser 사본 동기화
 
 ### Phase 6. 모니터링·운영
@@ -161,6 +162,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-11 | P5-14 | rag-preparer, doc-parser | `RAG_UPLOAD_INDEXES`, `--uploads-only`, `claim_next` item_key 필터, 테스트 rag-preparer 19건·doc-parser 33건 통과 |
 | 2026-10-11 | P7-5 | request-pipeline | 브랜치를 `claude/ae-llm-agent-mail-retry-h1vk3i` 기준으로 재구성, 테스트 54건 통과 |
 | 2026-10-11 | P7-0~P7-3 | email-ingestion, request-pipeline | 브랜치를 `agent/deferred-file-archive` 기준으로 재구성, P4 변경 이식, 04~05시 자동 저장 추가, 테스트 18건 통과 |
 | 2026-10-11 | P3-14, P5-13 | doc-parser, rag-preparer | 파일 기준 백필 스크립트 2종(dry-run 기본, `--apply`), 테스트 doc-parser 32건·rag-preparer 16건 통과 |
@@ -345,7 +347,7 @@ WHERE id = …;
   PIPELINE_TEST_MYSQL_HOST=... PIPELINE_TEST_MYSQL_PORT=3306 PIPELINE_TEST_MYSQL_USER=... PIPELINE_TEST_MYSQL_PASSWORD=... \
     python -m pytest -q tests
   ```
-  기대 결과: doc-parser 32개 · rag-preparer 16개 · email-ingestion 18개 · request-pipeline 54개 통과.
+  기대 결과: doc-parser 33개 · rag-preparer 19개 · email-ingestion 18개 · request-pipeline 54개 통과.
 
 ### D-1. email-ingestion
 
