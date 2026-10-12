@@ -15,9 +15,9 @@ DB 주소·DB·계정 기본값은 공유 DB(`10.172.127.210:3306`, `fspas`, `db
 기본 시간 예산은 50분(`RAG_PREPARER_TIME_BUDGET_SEC`)이며 1회 실행 후 종료합니다.
 `upload_indices.py`(상주 루프)는 예전 방식이며, `run_pipeline.py`로 전환한 뒤에는 함께 실행하지 않습니다.
 
-용어 잡 2개도 1시간마다 1회 실행합니다. 승격이 끝난 뒤 인덱스를 올리도록 한 명령으로 묶습니다:
-`python term_dictionary/promote_candidate_terms.py && python term_dictionary/upload_term_index.py`
-(관리자 승인 → 사전·용어 인덱스 반영 P95 ≤60분이 PoC V20 목표입니다.)
+용어 승격 잡도 1시간마다 1회 실행합니다: `python term_dictionary/promote_candidate_terms.py`
+(관리자 승인 → 사전 반영 P95 ≤60분이 PoC V20 목표입니다.) 용어 인덱스(`upload_term_index.py`)는
+프로세스에서 제거되어 실행하지 않습니다.
 
 ## 기존 처리분 백필 (최초 1회)
 
@@ -84,9 +84,10 @@ PIPELINE_TEST_MYSQL_HOST=127.0.0.1 PIPELINE_TEST_MYSQL_USER=root PIPELINE_TEST_M
 
 ## 용어사전 잡
 
-`term_dictionary/promote_candidate_terms.py`, `term_dictionary/upload_term_index.py`도 기본적으로 **1회 실행 후 종료**합니다.
+`term_dictionary/promote_candidate_terms.py`는 기본적으로 **1회 실행 후 종료**합니다.
 스케줄러에 1시간 주기로 등록하세요(`nohup` 상주 실행 불필요). 오류가 나면 종료 코드 1을 반환합니다.
-예전처럼 상주 실행하려면 `PROMOTE_RUN_ONCE=false`, `TERM_SYNC_RUN_ONCE=false`.
+예전처럼 상주 실행하려면 `PROMOTE_RUN_ONCE=false`.
+용어 인덱스(`upload_term_index.py`)는 프로세스에서 제거되어 실행하지 않습니다.
 
 ## 용어 승격 실패 처리
 
@@ -302,9 +303,9 @@ DBeaver에서 `term_candidate_queue`를 보고 사람이 검토.
 * `review_status = promoted`
 * `promoted_term_id` 기록
 
-## 4단계
+## 4단계 (사용 중지)
 
-`upload_term_index.py`가 변경된 term만 vector DB에 반영
+용어 인덱스(`upload_term_index.py`)는 프로세스에서 제거되었습니다. 승격된 사전은 Curator가 DB에서 바로 읽습니다.
 
 ---
 
@@ -338,18 +339,9 @@ ps -ef | grep promote_candidate_terms.py
 
 ---
 
-# 5. `upload_term_index.py` 실행 방법
+# 5. `upload_term_index.py` (사용 중지)
 
-이것도 같이 상시 실행
-
-```bash
-nohup python upload_term_index.py > upload_term_index.log 2>&1 &
-```
-
-즉, 용어사전 계열은 두 프로세스가 같이 떠야함.
-
-* `promote_candidate_terms.py`
-* `upload_term_index.py`
+용어 인덱스는 프로세스에서 제거되어 실행하지 않습니다. 용어사전 계열은 `promote_candidate_terms.py` 하나만 1시간 주기로 실행합니다.
 
 ---
 

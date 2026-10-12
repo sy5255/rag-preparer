@@ -194,8 +194,7 @@ WHERE id=…;
 | request-pipeline | `/config/work/request-pipeline` | `python run_pipeline.py` | 55분 처리 + 3분 대기 후 종료 |
 | doc-parser | `/config/work/doc-parser` | `python app.py` | 시간 예산 50분 |
 | rag-preparer | `/config/work/rag-preparer` | `python run_pipeline.py` | 시간 예산 50분 |
-| rag-preparer (용어 승격) | `/config/work/rag-preparer` | `python term_dictionary/promote_candidate_terms.py` | 1시간마다 1회 실행. 용어 인덱스보다 먼저 |
-| rag-preparer (용어 인덱스) | `/config/work/rag-preparer` | `python term_dictionary/upload_term_index.py` | 1시간마다 1회 실행. 용어 승격 직후 (승인 → 사전·인덱스 반영 P95 ≤60분, PoC V20) |
+| rag-preparer (용어 승격) | `/config/work/rag-preparer` | `python term_dictionary/promote_candidate_terms.py` | 1시간마다 1회 실행 (승인 → 사전 반영 P95 ≤60분, PoC V20) |
 
 DB 접속 주소·DB·계정 기본값은 4개 저장소 모두 공유 DB(`10.172.127.210:3306`, `fspas`, `dbuser`)입니다.
 doc-parser·rag-preparer는 각 폴더에서 `cp .env.example .env` 후 `.env`의 `MYSQL_PASSWORD`만 채우면 됩니다
@@ -431,7 +430,7 @@ WHERE id = …;
 - [ ] **재개**: 실행 중 `kill -9` → 다음 실행 로그 `recovered=` ≥ 1, 해당 작업이 이어서 완료
 - [ ] **용어 잡**:
   - `python term_dictionary/promote_candidate_terms.py` → 1회 실행 후 종료, 종료 코드 0, `term_candidate_queue.promote_error` 컬럼 생성
-  - `python term_dictionary/upload_term_index.py` → 1회 실행 후 종료
+  - `upload_term_index.py`는 용어 인덱스 제거로 실행하지 않음
 - [ ] 스케줄러 등록 (부록 A)
 
 ### D-4. request-pipeline
