@@ -148,6 +148,7 @@ WHERE id=…;
 - [x] P6-5 진행 현황 뷰에 API_ANALYSIS(request-pipeline) 흐름 포함: `route_type`, `analysis_status`, `send_status`, `sent_at`, 현재 위치 요약 `current_step` 추가
 - [x] P6-6 진행 현황 뷰에 CONFLICT(규칙 충돌) 메일 포함: `current_step='CONFLICT'`, `conflict_reason`
 - [x] P6-7 운영 환경 검증 가이드(이 문서 **부록 D**)
+- [x] P6-8 (운영 피드백) 용어 승격이 `term_dictionary`·`term_aliases`의 `updated_at`을 직접 기록, 용어 인덱스(`upload_term_index.py`)는 프로세스에서 제거되어 실행하지 않음, 용어 승격 잡은 1시간 주기(부록 A)
 
 ### Phase 7. email-ingestion 야간 FILE_ARCHIVE
 > 야간 저장 기능은 `agent/deferred-file-archive` 브랜치에 이미 구현되어 있어 그 구현을 기준으로 합니다.
@@ -164,6 +165,7 @@ WHERE id=…;
 |---|---|---|---|
 | 2026-10-04 | P0-1 | 전체 | 작업계획서 배포 |
 | 2026-10-04 | P1-1~P1-6 | rag-preparer | 업로드 실패 추적·원자적 출력·hash 버그 수정, 테스트 `tests/` 추가 |
+| 2026-10-12 | P6-8 | rag-preparer | 용어 승격 `updated_at` 기록, 용어 인덱스 사용 중지, 승격 잡 1시간 주기, 테스트 22건 통과 |
 | 2026-10-11 | P3-16 | doc-parser, rag-preparer | 백필이 파일 하나의 오류로 중단되지 않게 수정, 테스트 doc-parser 35건·rag-preparer 20건 통과 |
 | 2026-10-11 | P3-15 | doc-parser | 삭제된 결과 폴더를 가리키는 PARSE 작업 복구(`parse_repointed`/`parse_reset_missing_output`), 테스트 34건 통과 |
 | 2026-10-11 | P5-14 | rag-preparer, doc-parser | `RAG_UPLOAD_INDEXES`, `--uploads-only`, `claim_next` item_key 필터, 테스트 rag-preparer 19건·doc-parser 33건 통과 |
@@ -350,7 +352,7 @@ WHERE id = …;
   PIPELINE_TEST_MYSQL_HOST=... PIPELINE_TEST_MYSQL_PORT=3306 PIPELINE_TEST_MYSQL_USER=... PIPELINE_TEST_MYSQL_PASSWORD=... \
     python -m pytest -q tests
   ```
-  기대 결과: doc-parser 35개 · rag-preparer 20개 · email-ingestion 18개 · request-pipeline 54개 통과.
+  기대 결과: doc-parser 35개 · rag-preparer 22개 · email-ingestion 18개 · request-pipeline 54개 통과.
 
 ### D-1. email-ingestion
 
