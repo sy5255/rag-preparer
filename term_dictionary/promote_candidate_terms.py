@@ -249,6 +249,8 @@ def ensure_drafts_if_missing(row: Dict[str, Any]) -> Dict[str, Any]:
 # =========================
 # TERM UPSERT
 # =========================
+# updated_at은 직접 기록합니다. 테이블이 ON UPDATE CURRENT_TIMESTAMP로 만들어졌는지에 기대지 않아야
+# 승격으로 바뀐 사전이 "최근 갱신"과 승인값 대조(등록 후 수정 구분)에 그대로 드러납니다.
 def upsert_term(cur, term: Dict[str, Any]) -> int:
     sql_select = """
     SELECT term_id
@@ -280,7 +282,8 @@ def upsert_term(cur, term: Dict[str, Any]) -> int:
             metadata_json = %s,
             priority = %s,
             expand_to_aliases = %s,
-            search_boost = %s
+            search_boost = %s,
+            updated_at = CURRENT_TIMESTAMP
         WHERE term_id = %s
         """
         cur.execute(
@@ -312,9 +315,10 @@ def upsert_term(cur, term: Dict[str, Any]) -> int:
         metadata_json,
         priority,
         expand_to_aliases,
-        search_boost
+        search_boost,
+        updated_at
     )
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
     """
     cur.execute(
         sql_insert,
@@ -359,7 +363,8 @@ def upsert_alias(cur, term_id: int, alias: Dict[str, Any]) -> None:
             match_type = %s,
             language_code = %s,
             is_preferred = %s,
-            status = %s
+            status = %s,
+            updated_at = CURRENT_TIMESTAMP
         WHERE alias_id = %s
         """
         cur.execute(
@@ -384,9 +389,10 @@ def upsert_alias(cur, term_id: int, alias: Dict[str, Any]) -> None:
         match_type,
         language_code,
         is_preferred,
-        status
+        status,
+        updated_at
     )
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
     """
     cur.execute(
         sql_insert,

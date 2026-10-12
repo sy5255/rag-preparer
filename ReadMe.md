@@ -15,6 +15,10 @@ DB 주소·DB·계정 기본값은 공유 DB(`10.172.127.210:3306`, `fspas`, `db
 기본 시간 예산은 50분(`RAG_PREPARER_TIME_BUDGET_SEC`)이며 1회 실행 후 종료합니다.
 `upload_indices.py`(상주 루프)는 예전 방식이며, `run_pipeline.py`로 전환한 뒤에는 함께 실행하지 않습니다.
 
+용어 잡 2개도 1시간마다 1회 실행합니다. 승격이 끝난 뒤 인덱스를 올리도록 한 명령으로 묶습니다:
+`python term_dictionary/promote_candidate_terms.py && python term_dictionary/upload_term_index.py`
+(관리자 승인 → 사전·용어 인덱스 반영 P95 ≤60분이 PoC V20 목표입니다.)
+
 ## 기존 처리분 백필 (최초 1회)
 
 예전에 처리한 파일을 기준으로 DB 작업 상태를 채웁니다. **doc-parser의 `backfill_from_files.py --apply`를 먼저 실행**한 뒤:
